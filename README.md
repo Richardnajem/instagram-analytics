@@ -2,6 +2,34 @@
 
 A comprehensive Instagram analytics dashboard for tracking key performance metrics.
 
+## Run it on a new machine
+
+Nothing is installed system-wide and nothing is uploaded anywhere. On a fresh
+Windows, macOS or Linux machine with Node 18 or newer:
+
+| Step | Command | Why |
+|---|---|---|
+| 1. Check Node | `node --version` | Electron 28 needs Node 18+. |
+| 2. Install | `npm ci` | Installs exactly the versions in `package-lock.json`, so a second machine gets the same app. |
+| 3. Run | `npm start` | Opens the app in its own local window. |
+| 4. Prove it booted | `npm run test:boot` | Loads the real `index.html` in Electron and fails loudly if any module did not load. |
+| 5. Prove the numbers | `npm test` | Pagination, scan orchestration, saved scans, project inventory, advice, error logging, determinism, unfollow honesty. |
+
+Optional — the Python scan path only: install Python 3 (the app offers to
+`pip install instaloader` on first use). Without Python the app still scans
+through its other sources and reports what it could not reach.
+
+### Packaging a build to hand to someone else
+
+| Command | Result |
+|---|---|
+| `npm run pack` | An unpacked build in `dist/win-unpacked/` (fast, best for testing) |
+| `npm run dist` | The single portable `.exe` in `dist/`, version bumped |
+
+`Launch App.bat` starts whatever build is in `dist/` and says what to run if
+there is none. Packaged builds are deliberately **not** committed: the portable
+installer is far larger than GitHub's 100 MB per-file limit.
+
 ## Features
 
 ### Metrics Tracked
@@ -209,12 +237,30 @@ Add your specific API URL and access token in the Settings tab.
 
 ## File Structure
 
+The renderer is plain `<script>` tags in a fixed order — there is no bundler,
+so load order matters (`boot-diagnostics.js` must come before `app.js`).
+
 ```
-SWA - Small World Analytics/
-├── index.html          # Main application file
-├── styles.css          # All styling (dark/light themes)
-├── app.js              # Application logic and charts
-└── README.md           # This file
+├── index.html                 # Markup; loads the modules below in order
+├── main.js                    # Electron main process, window, IPC scan driver
+├── app.js                     # App class, boot, toasts, profile fetch flow
+├── post-analysis.js           # Per-post "Comprehensive Analysis" panel
+├── utils.js                   # Shared helpers
+├── scraping.js                # Profile/post scraping and every source strategy
+├── history-scan.js            # Full-history pagination (cursors, retries, coverage)
+├── metrics.js                 # Metrics, analysis, fake-follower estimate, advice
+├── charts.js                  # Chart.js visualisations
+├── ui.js                      # Pages, post grid, dashboard, freshness strip
+├── project-inventory.js       # Projects tab: guide, inventory, double-check, exports
+├── instagram-auth.js          # Instagram login, session, unfollow
+├── storage.js                 # localStorage persistence, history, scan snapshots
+├── error-handling.js          # Runtime error handling and known-error hints
+├── boot-diagnostics.js        # Boot-time capture and module-load verification
+├── animations.js              # Intro overlay, entrance and scroll animations
+├── context-menu.js            # Right-click menus and metric tooltips
+├── styles.css                 # Styling, including post-analysis.css for the panel
+├── instaloader_helper.py      # Optional Python full-history path
+└── test_*.js                  # Test suites for `npm test` and `npm run test:boot`
 ```
 
 ## Data Storage

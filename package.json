@@ -20,7 +20,25 @@
   "build": {
     "appId": "com.smallworld.analytics",
     "productName": "Small World Analytics",
-    "icon": "assets/swa_icon.ico"
+    "icon": "assets/swa_icon.ico",
+    "directories": {
+      "output": "dist"
+    },
+    "asarUnpack": [
+      "instaloader_helper.py"
+    ],
+    "files": [
+      "**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/README.md"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/swa_icon.ico",
+      "signAndEditExecutable": false
+    }
   },
   "keywords": [
     "instagram",

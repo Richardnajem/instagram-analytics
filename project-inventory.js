@@ -53,8 +53,33 @@
     /* ── Source shortcuts used in the rows below ─────────────────────────── */
     var SITE = 'https://www.smallworldfoundation.com/';
     function web(page) { return 'Website — ' + page + ': ' + SITE + page; }
-    var GALA = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\GALA\\';
-    var SWDOCS = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\Smallworld\\';
+    /* ── Where the recorded sources actually live ──────────────────────────
+       The row data below records WHERE each source was found, which is
+       documented fact and is kept. What is not portable is one machine's folder
+       prefix, so the prefix is resolved at load rather than baked into every
+       path: point the app at your own copy of the archive (Projects tab →
+       Field guide & sources) and every recorded location follows it. Left
+       unset, the recorded default below is shown as the documented location
+       and rows fall back to a generated tile instead of a photograph the app
+       cannot reach. */
+    var CAMERA_ROOT_KEY = 'swaCameraProjectsRoot';
+    var RECORDED_CAMERA_ROOT = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\';
+
+    function cameraRootSetting() {
+        try {
+            return ((typeof localStorage !== 'undefined') && localStorage.getItem(CAMERA_ROOT_KEY)) || '';
+        } catch (e) { return ''; }
+    }
+
+    function resolveCameraRoot() {
+        var saved = cameraRootSetting();
+        if (saved) return String(saved).replace(/[\\/]+$/, '') + '\\';
+        return RECORDED_CAMERA_ROOT;
+    }
+
+    var CAMERA_ROOT = resolveCameraRoot();
+    var GALA = CAMERA_ROOT + 'GALA\\';
+    var SWDOCS = CAMERA_ROOT + 'Smallworld\\';
     var IG = 'Instagram @smallworld_foundation: https://www.instagram.com/smallworld_foundation/';
 
     var MISS_WEB = 'Beneficiary organisation, exact location, child count/ages, amount and currency, delivery date, and the agreement/receipt — the source is a one-line website summary.';
@@ -824,8 +849,8 @@
        the sources contain one for that country or event; otherwise a generated
        tile (flag + project id) is drawn. Nothing is passed off as a photo of a
        project that has no photograph in the sources. */
-    var SW_MEDIA = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\Smallworld\\';
-    var GALA_MEDIA = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\GALA\\';
+    var SW_MEDIA = SWDOCS;
+    var GALA_MEDIA = GALA;
 
     var COUNTRY_IMAGE = {
         'Armenia': 'armenia.jpg',
@@ -2185,6 +2210,27 @@
                     '</div>';
             }).join('') +
 
+            '<div class="section-title">🗂️ The local photo &amp; document archive</div>' +
+            '<div class="card pinv-card">' +
+            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0 0 .7rem;">' +
+            'The recorded file locations point into the folder the sources were found in on one machine. ' +
+            'Point the app at your own copy and every recorded location resolves to it; leave it unset and the recorded ' +
+            'location is still shown as documentation, while rows fall back to a generated tile instead of a photograph ' +
+            'the app cannot reach.</p>' +
+            '<div class="pinv-actions" style="gap:.5rem;flex-wrap:wrap;margin:0;">' +
+            '<input type="text" id="pinvCameraRoot" spellcheck="false" aria-label="Archive folder" ' +
+            'placeholder="' + esc(RECORDED_CAMERA_ROOT) + '" value="' + esc(cameraRootSetting()) + '" ' +
+            'style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);' +
+            'background:var(--glass-bg);color:var(--text-primary);font-size:.8rem;margin-bottom:.6rem;font-family:\'JetBrains Mono\',monospace;">' +
+            '<div class="pinv-actions" style="gap:.5rem;flex-wrap:wrap;margin:0;">' +
+            '<button id="pinvSaveCameraRoot" class="btn btn-primary">Save folder</button>' +
+            '<button id="pinvClearCameraRoot" class="btn btn-secondary">Use recorded default</button>' +
+            '</div>' +
+            '<p class="pinv-muted" style="font-size:.78rem;margin:.6rem 0 0;">Resolving to: <code>' + esc(CAMERA_ROOT) + '</code>' +
+            (cameraRootSetting() ? '' : ' — the recorded default, which may not be the folder on this PC.') + '</p>' +
+            '<p id="pinvCameraRootStatus" class="pinv-muted" style="font-size:.78rem;margin:.35rem 0 0;"></p>' +
+            '</div>' +
+
             '<div class="section-title">📝 How this inventory was built</div>' +
             '<ul class="pinv-list" style="padding-left:1.1rem;">' +
             METHOD_NOTES.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') +
@@ -2542,6 +2588,32 @@
                 return q(f.field) + ',' + q(f.what);
             }).join('\n');
             downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), 'SmallWorld-Project-Field-Guide.csv');
+        });
+
+        /* Point the app at this machine's copy of the source archive. The
+           recorded paths resolve when the module loads, so a change is applied
+           by reloading rather than by half-updating the already-built rows. */
+        var camSave = document.getElementById('pinvSaveCameraRoot');
+        if (camSave) camSave.addEventListener('click', function () {
+            var input = document.getElementById('pinvCameraRoot');
+            var status = document.getElementById('pinvCameraRootStatus');
+            var value = input ? String(input.value || '').trim() : '';
+            try {
+                if (value) localStorage.setItem(CAMERA_ROOT_KEY, value);
+                else localStorage.removeItem(CAMERA_ROOT_KEY);
+            } catch (e) {
+                if (status) status.textContent = 'Could not save the folder: ' + (e && e.message ? e.message : e);
+                return;
+            }
+            if (status) status.textContent = 'Saved — re-resolving the recorded locations…';
+            if (typeof location !== 'undefined' && location.reload) location.reload();
+        });
+        var camClear = document.getElementById('pinvClearCameraRoot');
+        if (camClear) camClear.addEventListener('click', function () {
+            var input = document.getElementById('pinvCameraRoot');
+            if (input) input.value = '';
+            try { localStorage.removeItem(CAMERA_ROOT_KEY); } catch (e) { }
+            if (typeof location !== 'undefined' && location.reload) location.reload();
         });
 
         var loadSnap = document.getElementById('pinvLoadSnapshot');

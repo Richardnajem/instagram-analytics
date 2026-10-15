@@ -1708,7 +1708,12 @@
             const { spawn } = require('child_process');
             const path = require('path');
             const fs = require('fs');
-            const scriptPath = path.join(__dirname, 'instaloader_helper.py');
+            // In a packaged build the app runs from inside app.asar, and Python
+            // cannot open a path inside an asar archive. The helper is therefore
+            // unpacked beside it (asarUnpack in package.json), so resolve to the
+            // real file when packaged and to the plain one when running unpacked.
+            const scriptPath = path.join(__dirname, 'instaloader_helper.py')
+                .replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 
             if (!fs.existsSync(scriptPath)) {
                 return reject(new Error('instaloader_helper.py not found'));

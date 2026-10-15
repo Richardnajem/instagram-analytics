@@ -48,7 +48,10 @@ function loadSession() {
 
 /** Run instaloader_helper.py and return its parsed JSON result (or null). */
 function runInstaloader(username, userId) {
-    const script = path.join(__dirname, 'instaloader_helper.py');
+    // Inside a packaged app __dirname is inside app.asar, which Python cannot
+    // open — asarUnpack puts the helper beside the archive instead.
+    const script = path.join(__dirname, 'instaloader_helper.py')
+        .replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
     if (!fs.existsSync(script)) return null;
     const args = [script, username];
     if (userId) args.push('--userid', String(userId));
