@@ -291,9 +291,10 @@ All data is stored locally in your browser using:
 3. Export data regularly to avoid loss
 
 ### Charts not displaying?
-- Ensure you have an internet connection (Chart.js loads from CDN)
-- Check browser console for loading errors
-- Try a different modern browser (Chrome, Firefox, Edge, Safari)
+- Chart.js and GSAP are served from `node_modules/`, not a CDN, so run
+  `npm ci` if that folder is missing — the charts then work with no internet
+- Check the console for loading errors, and the Error Log page, which lists
+  failed assets separately from failed code
 
 ## Privacy & Security
 
