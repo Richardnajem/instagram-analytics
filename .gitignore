@@ -1,0 +1,17 @@
+# Instagram session export — contains a live sessionid (sensitive credential)
+ig_session.json
+
+# Node
+node_modules/
+
+# Temp / scan artifacts
+live_scan*.json
+live_scan*_err.txt
+
+# Packaged Electron builds — the installer exceeds GitHub's 100 MB file limit
+dist/
+dist_new/
+
+# Python bytecode cache
+__pycache__/
+

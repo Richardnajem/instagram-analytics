@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SWA - Small World Analytics</title>
+    <meta name="description" content="Instagram profile scanner with post thumbnails, AI suggestions, and full analytics">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="post-analysis.css">
+</head>
+
+<body>
+
+    <!-- Boot watchdog: reveals a failure message ONLY if the app never actually
+         starts. It waits for window.__swaBooted (set by InstagramAnalytics.boot),
+         so a merely-slow launch (cold disk, OneDrive sync, large bundles) can no
+         longer be mistaken for a failed one. This runs even if all other JS breaks. -->
+    <script>
+        (function () {
+            var FAIL_AFTER = 12000; // generous grace period before declaring failure
+            function booted() { return window.__swaBooted === true; }
+            function dismissSplash() {
+                var el = document.getElementById('intro');
+                if (el && el.parentNode) { try { el.parentNode.removeChild(el); } catch (e) {} }
+            }
+            // Once boot succeeds, stop polling. The app owns the splash timing
+            // (its intro animation plays, then removes the splash itself), so we
+            // must NOT dismiss it here — doing so cut the animation off ~250 ms
+            // in. We only keep a late safety net in case the app's own intro
+            // handler fails and leaves the splash stuck on screen.
+            var poll = setInterval(function () {
+                if (booted()) {
+                    clearInterval(poll);
+                    setTimeout(dismissSplash, 8000);
+                }
+            }, 250);
+            setTimeout(function () {
+                if (booted()) return; // started fine — leave the rest to the app
+                clearInterval(poll);
+                dismissSplash();
+                var msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:#070b18;color:#94a3b8;font-family:Inter,sans-serif;font-size:.9rem;z-index:9999;text-align:center;padding:2rem';
+                // Show what actually went wrong, from the pre-boot buffer — a
+                // failure screen that only says "check the console" tells the
+                // user nothing about which module or step died.
+                var details = '';
+                try {
+                    if (window.__swaBootErrorsText) {
+                        var lines = window.__swaBootErrorsText();
+                        if (lines && lines.length) {
+                            details = '<div style="max-width:640px;text-align:left;font-family:monospace;font-size:.7rem;color:#94a3b8;background:#0b1120;border:1px solid #1e293b;border-radius:8px;padding:.6rem .75rem;margin-top:.25rem">' +
+                                lines.map(function (l) {
+                                    return '<div>' + String(l).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
+                                }).join('') + '</div>';
+                        }
+                    }
+                } catch (e) { /* fall back to the plain message */ }
+                msg.innerHTML = '<span style="font-size:2.5rem">⚠️</span><div>App failed to load. Check the console for errors.</div>' +
+                    details +
+                    '<div style="font-size:.75rem;color:#475569">Press Ctrl+Shift+I for DevTools, then Ctrl+R to reload</div>' +
+                    '<button id="swaRetryBtn" style="margin-top:8px;padding:.5rem 1rem;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;cursor:pointer">Reload app</button>';
+                document.body.appendChild(msg);
+                var btn = document.getElementById('swaRetryBtn');
+                if (btn) btn.onclick = function () { location.reload(); };
+            }, FAIL_AFTER);
+        })();
+    </script>
+
+    <!-- Custom Titlebar -->
+    <div id="titlebar">
+        <div class="titlebar-left">
+            <div class="app-icon-wrapper">
+                <img src="assets/swa_logo.png" alt="SWA" class="app-icon" onerror="this.style.display='none'">
+            </div>
+            <span class="titlebar-title">SWA — Small World Analytics</span>
+        </div>
+        <div class="titlebar-controls">
+            <button class="tb-btn tb-min" id="tbMinimize" title="Minimize">&#8211;</button>
+            <button class="tb-btn tb-max" id="tbMaximize" title="Maximize">&#9633;</button>
+            <button class="tb-btn tb-close" id="tbClose" title="Close">&#10005;</button>
+        </div>
+    </div>
+
+    <!-- Intro Splash -->
+    <div id="intro">
+        <!-- Animated background particles -->
+        <div class="intro-particles" id="introParticles"></div>
+
+        <!-- Orbiting rings -->
+        <div class="intro-orbit-ring intro-ring-1"></div>
+        <div class="intro-orbit-ring intro-ring-2"></div>
+
+        <!-- Central Logo — actual app logo -->
+        <div class="intro-logo-wrap">
+            <img src="assets/swa_logo.png" alt="SWA Logo" class="intro-logo-sphere" onerror="this.style.display='none'">
+            <div class="intro-logo-glow"></div>
+        </div>
+
+        <!-- Brand -->
+        <div class="intro-brand">
+            <div class="intro-brand-name">SWA</div>
+            <div class="intro-brand-sub">Small World Analytics</div>
+            <div class="intro-tagline">Instagram Intelligence · 2026</div>
+        </div>
+
+        <!-- Loading section -->
+        <div class="intro-loader">
+            <div class="intro-spinner"></div>
+            <div class="intro-loading" id="introLoadingText">Initializing modules...</div>
+            <div class="intro-progress-wrap">
+                <div class="intro-progress-bar" id="introProgressBar"></div>
+            </div>
+            <div class="intro-version" id="introVersion">v1.2.0</div>
+        </div>
+    </div>
+
+    <!-- App Shell -->
+    <div id="app-shell">
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <img src="assets/swa_logo.png" alt="SWA" class="sidebar-logo-img" onerror="this.style.display='none'">
+                <span class="sidebar-logo-text">SWA Analytics</span>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-item active" data-page="dashboard">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    <span class="nav-label">Dashboard</span>
+                </div>
+                <div class="nav-item" data-page="posts">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                    </svg>
+                    <span class="nav-label">Posts</span>
+                </div>
+                <div class="nav-item" data-page="analysis">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M2 20h20"/>
+                        <path d="M12 14l-5 5"/>
+                        <path d="M17 9l-5 5"/>
+                        <path d="M12 6l-5 5"/>
+                    </svg>
+                    <span class="nav-label">Analysis</span>
+                </div>
+
+                <div class="nav-item" data-page="metrics">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="1" x2="12" y2="23"/>
+                        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                    <span class="nav-label">Metrics</span>
+                </div>
+                <div class="nav-item" data-page="history">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 8v4l3 3"/>
+                        <circle cx="12" cy="12" r="9"/>
+                    </svg>
+                    <span class="nav-label">History</span>
+                </div>
+                <div class="nav-item" data-page="projects">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                        <line x1="3" y1="11" x2="21" y2="11"/>
+                    </svg>
+                    <span class="nav-label">Projects</span>
+                </div>
+                <div class="nav-item" data-page="errors">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span class="nav-label">Error Log</span>
+                    <span class="nav-badge" id="errorNavBadge" style="display:none">0</span>
+                </div>
+                <div class="nav-item" data-page="settings">
+                    <svg class="nav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span class="nav-label">Settings</span>
+                </div>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="version-badge">
+                    <span class="version-icon">🔖</span>
+                    <span class="version-text" id="appVersion">v1.1.6</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="mainContent">
+
+            <!-- Data freshness strip.
+                 Always says which scan the screen is showing and how old it is.
+                 While a live scan runs it keeps the saved result on screen and
+                 labels it as the saved one — the dashboard never goes blank and
+                 a stale number is never mistaken for a live one. -->
+            <div id="scanFreshness" class="scan-freshness hidden">
+                <span class="scan-freshness-icon" id="scanFreshnessIcon">💾</span>
+                <div class="scan-freshness-body">
+                    <div class="scan-freshness-title" id="scanFreshnessTitle">No scan saved yet</div>
+                    <div class="scan-freshness-meta" id="scanFreshnessMeta"></div>
+                </div>
+                <div class="scan-freshness-actions">
+                    <button id="scanFreshnessRestore" class="btn btn-secondary" style="font-size:.76rem;padding:.35rem .7rem;">Use saved scan</button>
+                    <button id="scanFreshnessRefresh" class="btn btn-primary" style="font-size:.76rem;padding:.35rem .7rem;">🔄 Refresh live</button>
+                </div>
+            </div>
+
+            <!-- Dashboard Page -->
+            <div id="dashboard" class="page active">
+                <div class="page-header">
+                    <h1>📊 Live Dashboard</h1>
+                    <p>Real-time Instagram profile analytics with AI-powered insights</p>
+                </div>
+
+                <!-- Username Search Bar -->
+                <div class="search-bar-wrap tooltip-container" data-tooltip="Search for any social profile to view their analytics and metrics">
+                    <div class="search-bar-inner">
+                        <!-- Platform Selector Dropdown -->
+                        <div class="platform-selector" id="platformSelector">
+                            <div class="platform-current" id="platformCurrent">
+                                <span class="platform-icon" id="platformIcon">📷</span>
+                                <span class="platform-name" id="platformName">Instagram</span>
+                                <svg class="platform-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                            </div>
+                            <div class="platform-dropdown" id="platformDropdown">
+                                <div class="platform-option active" data-platform="instagram">
+                                    <span class="platform-option-icon">📷</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">Instagram</span>
+                                        <span class="platform-option-desc">Photos, Reels, Stories</span>
+                                    </div>
+                                </div>
+                                <div class="platform-option" data-platform="tiktok">
+                                    <span class="platform-option-icon">🎵</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">TikTok</span>
+                                        <span class="platform-option-desc">Videos, Trends, Sounds</span>
+                                    </div>
+                                </div>
+                                <div class="platform-option" data-platform="threads">
+                                    <span class="platform-option-icon">🧵</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">Threads</span>
+                                        <span class="platform-option-desc">Text, Photos, Discussions</span>
+                                    </div>
+                                </div>
+                                <div class="platform-option" data-platform="x">
+                                    <span class="platform-option-icon">𝕏</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">X (Twitter)</span>
+                                        <span class="platform-option-desc">Tweets, Media, Trends</span>
+                                    </div>
+                                </div>
+                                <div class="platform-option" data-platform="snapchat">
+                                    <span class="platform-option-icon">👻</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">Snapchat</span>
+                                        <span class="platform-option-desc">Snaps, Stories, Spotlight</span>
+                                    </div>
+                                </div>
+                                <div class="platform-option" data-platform="facebook">
+                                    <span class="platform-option-icon">👍</span>
+                                    <div class="platform-option-info">
+                                        <span class="platform-option-name">Facebook</span>
+                                        <span class="platform-option-desc">Pages, Groups, Reels</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="platform-divider"></div>
+                        <span class="search-at">@</span>
+                        <input type="text" id="usernameInput" class="search-input" value="smallworld_foundation" placeholder="e.g. smallworld_foundation" autocomplete="off" spellcheck="false">
+                        <button id="fetchBtn" class="btn btn-primary tooltip-btn" data-tooltip="Scan profile and fetch posts with thumbnails">
+                            <span id="fetchBtnText">🔍 Scan Profile</span>
+                        </button>
+                    </div>
+                    <div class="platform-indicator" id="platformIndicator">
+                        <span class="platform-indicator-badge" id="platformIndicatorBadge">📷 Instagram</span>
+                        <span class="platform-indicator-text">Public profile scanner &middot; No login required</span>
+                    </div>
+                    <div id="searchSuggestions" class="search-suggestions" style="display:none"></div>
+
+                    <!-- Profile Badge -->
+                    <div id="profileBadge" class="profile-badge" style="display:none">
+                        <div class="profile-avatar-wrap">
+                            <img id="profileAvatar" class="profile-avatar" src="" alt="" />
+                        </div>
+                        <div class="profile-info">
+                            <div class="profile-fullname tooltip-item" id="profileFullName" data-tooltip="Full display name of the profile">—</div>
+                            <div class="profile-handle tooltip-item" id="profileHandle" data-tooltip="Profile handle on the selected platform">@—</div>
+                            <div class="profile-platform-badge" id="profilePlatformBadge">📷</div>
+                            <div class="profile-bio tooltip-container" style="position:relative;" data-tooltip="Profile biography and description">
+                                <div id="profileBio"></div>
+                            </div>
+                            <div class="profile-external tooltip-item" id="profileExternal" data-tooltip="External website link from profile">—</div>
+                            <div class="profile-updated tooltip-item" id="profileUpdatedAt" data-tooltip="When this data was last fetched live from the platform" style="font-size:.72rem;color:var(--text-muted);margin-top:2px">—</div>
+                        </div>
+                        <div class="profile-stats-row">
+                            <div class="profile-stat tooltip-container" style="position:relative;" data-tooltip="Total posts uploaded by this account">
+                                <div class="profile-stat-val" id="profilePosts">—</div>
+                                <div class="profile-stat-lbl">Posts</div>
+                            </div>
+                            <div class="profile-stat tooltip-container" style="position:relative;" data-tooltip="Total followers count for this profile">
+                                <div class="profile-stat-val" id="profileFollowers">—</div>
+                                <div class="profile-stat-lbl">Followers</div>
+                            </div>
+                            <div class="profile-stat tooltip-container" style="position:relative;" data-tooltip="Accounts being followed by this profile">
+                                <div class="profile-stat-val" id="profileFollowing">—</div>
+                                <div class="profile-stat-lbl">Following</div>
+                            </div>
+                        </div>
+                        <div class="profile-badges-row">
+                            <span id="verifiedBadge" class="badge-verified tooltip-container" style="display:none" data-tooltip="This account is verified on the platform">✔ Verified Account</span>
+                            <span id="privateBadge" class="badge-private tooltip-container" style="display:none" data-tooltip="This profile has privacy settings enabled">🔒 Private Profile</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action bar -->
+                <div class="top-bar">
+                    <div class="action-row">
+                        <button id="refreshBtn" class="btn btn-secondary tooltip-btn" data-tooltip="Refresh all data from API sources">🔄 Refresh Data</button>
+                        <button id="themeToggle" class="btn btn-secondary tooltip-btn" data-tooltip="Toggle between light and dark themes">🌓 Theme</button>
+                        <label for="fileUpload" class="btn btn-secondary" style="display:flex;align-items:center;gap:6px;padding:9px 20px;cursor:pointer;">
+                            🗺️ Upload Map
+                            <input type="file" id="fileUpload" accept=".json,.geojson,.gpx,.kml,.csv" style="display:none">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Stats grid -->
+                <div class="stats-grid tooltip-container" style="position:relative;">
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">📈 Engagement Rate</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: (Avg likes + avg comments) / followers × 100 — the primary benchmark for audience connection. WHY IT MATTERS: Higher ER means your content resonates. The Instagram algorithm prioritizes accounts with strong ER. BENCHMARK: &lt;1K: 5-10% | 1-10K: 3-6% | 10-100K: 2-3% | 100K+: 1-2%" id="statsEngRate">—</div>
+                    </div>
+                    
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">🔄 ERR (Eng. by Reach)</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: Engagement Rate by Reach — divides interactions by reach instead of followers. WHY IT MATTERS: More accurate than standard ER because it measures how people who actually SEE your content engage with it. BENCHMARK: 10-30% is strong. Above 30% is viral." id="statsErr">—</div>
+                    </div>
+                    
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">🎯 Profile CTR</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: Profile Action Click-Through Rate — how often viewers take action (visit link, DM, follow) after seeing your profile. WHY IT MATTERS: High CTR means your profile converts viewers into followers/customers. BENCHMARK: 2-8% is typical. Above 10% is excellent." id="statsProfileCTR">—</div>
+                    </div>
+                    
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">📊 Follower/Following Ratio</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: Ratio of followers to following. WHY IT MATTERS: A high ratio (10:1+) signals authority and authentic audience. Low ratio (&lt;1:1) suggests follow-back tactics or inactive followers. BENCHMARK: Top creators: 50:1+ | Micro-influencers: 5:1 | Personal: 3:1" id="ffRatioDisplay">—</div>
+                    </div>
+                    
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">❤️ Recent Avg Likes</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: Average likes received across scanned posts — gauge of content consistency. WHY IT MATTERS: Track this trend over time. Rising trend = content improvement. Declining trend = content fatigue or audience shift. BENCHMARK: Stable or growing avg is healthy." id="recentLikesDisplay">—</div>
+                    </div>
+                    
+                    <div class="card stat-card">
+                        <div class="stat-label-tooltip" style="margin-bottom:0.5rem">🎯 Est. Reach</div>
+                        <div class="stat-value tooltip-item" data-tooltip="WHAT: Estimated unique accounts that see your content (followers × engagement rate). WHY IT MATTERS: Reach determines your content's visibility. Higher ER = algorithm pushes content to more non-followers. BENCHMARK: 10-35% of followers reached per post is average." id="reachDisplay">—</div>
+                    </div>
+                    
+                    <!-- Advanced Dashboard Quick Stats -->
+                    <div class="card stat-card adv-dash-card" style="grid-column:1 / -1;">
+                        <div class="adv-dash-header">
+                            <span>🚀 Account Pulse</span>
+                            <span class="adv-dash-status" id="dashHealthStatus" style="font-weight:800;font-size:1.1rem">—</span>
+                        </div>
+                        <div class="adv-dash-grid">
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Daily follower/subscriber growth rate as % of total followers. WHY IT MATTERS: Indicates whether your content strategy is driving real audience growth. BENCHMARK: 0.15-0.5% daily (1-3.5% weekly) is healthy organic growth for most niches.">
+                                <span class="adv-dash-label">Growth Velocity</span>
+                                <span class="adv-dash-val" id="dashGrowthVel">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Percentage of reach coming from DM/shares. WHY IT MATTERS: High share rate means your content is valuable enough to forward to others — a strong virality signal. BENCHMARK: Above 0.5% indicates shareable content. Top 10% sees 1-3%.">
+                                <span class="adv-dash-label">Sends Per Reach</span>
+                                <span class="adv-dash-val" id="dashSendsPerReach">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Estimated percentage of reach from non-followers. WHY IT MATTERS: Shows how well your content reaches new audiences beyond your current followers. BENCHMARK: 30-60% is good discoverability. Viral content hits 70-90% non-follower reach.">
+                                <span class="adv-dash-label">Non-Follower Reach</span>
+                                <span class="adv-dash-val" id="dashNonFollowerReach">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Average watch/view duration for video content. WHY IT MATTERS: Longer watch time signals the algorithm that your content is engaging and should be shown to more people. BENCHMARK: 15-30s for short-form video is good. Below 5s needs better hooks.">
+                                <span class="adv-dash-label">Avg Watch Time</span>
+                                <span class="adv-dash-val" id="dashWatchTime">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Rate of change in engagement across your recent posts. WHY IT MATTERS: Positive velocity means your content is improving; negative means you need to pivot strategy. BENCHMARK: +5-20% is growing. Negative means declining engagement.">
+                                <span class="adv-dash-label">Eng. Velocity</span>
+                                <span class="adv-dash-val" id="dashEngVelocity">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: Ratio of saves/bookmarks to total reach. WHY IT MATTERS: Saves are a strong algorithmic signal — they indicate content worth revisiting. BENCHMARK: Above 2% save rate is good. Tutorials get 3-5x more saves than entertainment.">
+                                <span class="adv-dash-label">Saves/Reach Ratio</span>
+                                <span class="adv-dash-val" id="dashSavesRatio">—</span>
+                            </div>
+                            <div class="adv-dash-item tooltip-item" data-tooltip="WHAT: How discoverable your profile is in platform search results. WHY IT MATTERS: Optimized profiles get found by people searching for your niche or topic. BENCHMARK: High (70+/100) = fully optimized. Below 40 = missing key elements.">
+                                <span class="adv-dash-label">Social Search</span>
+                                <span class="adv-dash-val" id="dashSocialSearch">—</span>
+                            </div>
+                            <div class="adv-dash-item">
+                                <span class="adv-dash-label">Indicators</span>
+                                <div id="advancedIndicators" class="adv-indicators-mini"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Posts Preview (Dashboard Mid-Top) -->
+                <div class="section-title" id="dashPostsTitle" style="display:none">📸 Recent Posts <span style="font-size:.75rem;color:var(--text-muted);font-weight:400;margin-left:.5rem">Click to expand full analysis</span></div>
+                <div id="dashPostsEmpty" style="display:none;color:var(--text-muted);font-size:.85rem;padding:.5rem 0 1rem">No posts loaded yet — scan a profile to see posts with thumbnails and analytics here.</div>
+                <div class="dash-posts-preview" id="dashPostsPreview" style="display:none"></div>
+                <div id="dashPostsFooter" style="display:none;margin-top:.75rem;margin-bottom:1.5rem;text-align:center">
+                    <button class="btn btn-secondary" onclick="window.app && window.app.navigateTo('posts')" style="font-size:.85rem;padding:8px 24px">
+                        🖼️ View All Posts & Analytics →
+                    </button>
+                </div>
+
+                <!-- Charts section -->
+                <div class="section-title">📈 Analytics Charts</div>
+                <div class="charts-grid tooltip-container" style="position:relative;">
+                    <div class="card chart-card">
+                        <h3>Performance Radar</h3>
+                        <p class="chart-desc tooltip-item" data-tooltip="Radar chart showing key performance metrics: Engagement Rate, Like Rate, Comment Rate, Followers/Following Ratio, Video Percentage, and Profile Score. A balanced polygon indicates healthy account performance." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Multi-metric performance overview</p>
+                        <canvas id="performanceRadarChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Followers Over Time</h3>
+                        <p class="chart-desc tooltip-item" data-tooltip="Shows the growth trajectory of your followers over lookups or time periods. Steady upward trends indicate organic growth. Sudden spikes may indicate viral content or influencer collaborations." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Growth trajectory visualization</p>
+                        <canvas id="engagementChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Posts Over Time</h3>
+                        <p class="chart-desc tooltip-item" data-tooltip="Displays the posting frequency and content distribution. Consistent posting schedules help maintain audience engagement and algorithm favorability." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Posting frequency analysis</p>
+                        <canvas id="growthChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Follower/Following Ratio</h3>
+                        <p class="chart-desc tooltip-item" data-tooltip="A healthy ratio (typically 10:1 or higher) indicates an authentic audience focused on content rather than follow-back strategies. Low ratios may suggest inactive followers." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Authority and authenticity metric</p>
+                        <canvas id="ratioChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Recent Post Likes</h3>
+                        <p class="chart-desc tooltip-item" data-tooltip="Shows engagement on your latest posts. Higher like-to-view ratios indicate strong content resonance with your audience." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Content performance indicator</p>
+                        <canvas id="likesChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Engagement Rate Trend</h3>
+                        <p class="chart-desc" style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Per-post engagement rate across recent content</p>
+                        <canvas id="engRateChart"></canvas>
+                    </div>
+                    <div class="card chart-card">
+                        <h3>Post Type Breakdown</h3>
+                        <p class="chart-desc" style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Photos, videos, reels, and carousels</p>
+                        <canvas id="postTypeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- Posts Page -->
+            <div id="posts" class="page">
+                <!-- Posts Loading Overlay -->
+                <div id="postsLoadingOverlay" class="posts-loading-overlay hidden">
+                    <div class="posts-loading-spinner"></div>
+                    <div class="posts-loading-text" id="postsLoadingText">Loading posts...</div>
+                    <div class="posts-loading-sub">Fetching post data from Instagram — this may take a moment</div>
+                    <!-- Live progress for long full-history walks: pages and posts collected -->
+                    <div class="posts-loading-sub" id="postsLoadingProgress" style="margin-top:.35rem;color:var(--violet,#7c3aed);font-weight:600"></div>
+                </div>
+
+                <div class="page-header">
+                    <h1>🖼️ Recent Posts</h1>
+                    <p>Latest public posts from the fetched profile with engagement analytics</p>
+                </div>
+
+                <!-- Empty State -->
+                <div id="postsEmpty" class="posts-empty-state">
+                    <div class="posts-empty-icon">📸</div>
+                    <div class="posts-empty-title">No posts loaded yet</div>
+                    <div class="posts-empty-desc" id="postsEmptyDesc">Scan a profile on the <strong>Dashboard</strong> to see posts with thumbnails, engagement metrics, and AI-powered improvement tips.</div>
+                    <div class="posts-empty-actions" style="display:flex;gap:.75rem;margin-top:1rem;flex-wrap:wrap;justify-content:center">
+                        <button id="scanPostsBtn" class="btn btn-primary" style="display:none">
+                            🔄 Scan Posts Now
+                        </button>
+                        <button id="fullHistoryBtn" class="btn btn-primary tooltip-btn" style="display:none" data-tooltip="Fetch EVERY post the account has ever published — not just the newest few hundred — so the analytics describe the whole account">
+                            📚 Scan Full History
+                        </button>
+                        <button class="btn btn-secondary" onclick="window.app && window.app.navigateTo('dashboard')">
+                            📊 Go to Dashboard
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Post summary cards -->
+                <div class="stats-grid" id="postSummaryRow" style="display:none">
+                    <div class="card stat-card">
+                        <div class="stat-label">Posts Scanned</div>
+                        <div class="stat-value tooltip-item" data-tooltip="Total posts retrieved and analyzed for this profile" id="postsScanned">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Total Likes</div>
+                        <div class="stat-value tooltip-item" data-tooltip="Sum of all likes across scanned posts" id="postsTotalLikes">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Avg Likes / Post</div>
+                        <div class="stat-value tooltip-item" data-tooltip="Average likes per post, indicating consistent engagement levels" id="postsAvgLikes">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Total Comments</div>
+                        <div class="stat-value tooltip-item" data-tooltip="Total comments received across all scanned posts" id="postsTotalComments">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Photos</div>
+                        <div class="stat-value" id="postsPhotoCount">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Videos / Reels</div>
+                        <div class="stat-value" id="postsVideoCount">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Carousels</div>
+                        <div class="stat-value" id="postsCarouselCount">—</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Avg Engagement Rate</div>
+                        <div class="stat-value" id="postsAvgEngRate">—</div>
+                    </div>
+                </div>
+
+                <!-- Post thumbnail grid -->
+                <div class="posts-grid" id="postsGrid"></div>
+
+                <!-- Post type chart -->
+                <div id="postChartsSection" style="display:none">
+                    <div class="section-title">📊 Post Analytics</div>
+                    <div class="charts-grid tooltip-container" style="position:relative;">
+                        <div class="card chart-card">
+                            <h3>Posting Timeline</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Shows the posting frequency and activity timeline over time. Consistent posting schedules help maintain audience engagement." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Posting frequency over time</p>
+                            <canvas id="postingTimelineChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Likes Per Post</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Breakdown of likes received on individual posts. Identify top-performing content types and themes." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Individual post performance</p>
+                            <canvas id="likesPerPostChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Comments Per Post</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Comment activity across posts. Higher comment counts indicate deeper audience engagement and content resonance." style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Community engagement metric</p>
+                            <canvas id="commentsPerPostChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Engagement Rate Per Post</h3>
+                            <canvas id="engRatePerPostChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Likes vs Comments</h3>
+                            <canvas id="likesCommentsScatterChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Post Type Distribution</h3>
+                            <canvas id="postsTypeMixChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics Page -->
+            <div id="metrics" class="page">
+                <div class="page-header">
+                    <h1>📈 All Metrics</h1>
+                    <p>Complete analytics breakdown with detailed explanations</p>
+                </div>
+
+                <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="Estimated metrics derived from engagement patterns and public profile data">
+                    📊 Estimated Performance Metrics
+                    <span class="tooltip-helper"></span>
+                </div>
+                <div class="metric-grid tooltip-container" style="position:relative;">
+                    <div class="card metric-card">
+                        <h4>Est. Saves</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Estimated total saves across all scanned posts — high save rate signals valuable, bookmark-worthy content" id="engagementRateReach">—</div>
+                        <small>Content bookmark estimate</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Sends / Reach</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Percentage of reach coming from DM shares — high value indicates shareable content" id="sharesToReachRatio">—</div>
+                        <small>DM share rate vs total reach</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Reels Completion</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Estimated percentage of viewers who watch reels to completion — above 30% is strong" id="reelsRetentionRate">—</div>
+                        <small>Reels watched through to end</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>3-Second Skip Rate</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Estimated viewer skip rate within first 3 seconds — lower is better for retention" id="skipRate">—</div>
+                        <small>Viewers who skip before 3s</small>
+                    </div>
+                </div>
+
+                <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="Post-level metrics show detailed engagement data for each individual post">
+                    📸 Post Data (Detailed)
+                    <span class="tooltip-helper"></span>
+                </div>
+                <div class="metric-grid tooltip-container" style="position:relative;">
+                    <div class="card metric-card">
+                        <h4>Posts Scanned</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Latest posts retrieved for detailed analysis" id="mPostsScanned">—</div>
+                        <small>Individual posts analyzed in detail</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Avg Likes / Post</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Average engagement per post across the scanned period" id="mAvgLikes">—</div>
+                        <small>Total likes divided by number of posts</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Avg Comments / Post</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Mean comment count per post, indicating discussion level" id="mAvgComments">—</div>
+                        <small>Total comments divided by posts</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Est. Engagement Rate</h4>
+                        <div class="metric-value tooltip-item" data-tooltip="Calculated as (likes + comments) / followers × 100" id="mEngRate">—</div>
+                        <small>(Likes+Comments)/Followers×100</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Like Rate</h4>
+                        <div class="metric-value" id="mLikeRate">—</div>
+                        <small>Avg likes / followers × 100</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Comment Rate</h4>
+                        <div class="metric-value" id="mCommentRate">—</div>
+                        <small>Avg comments / followers × 100</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>F/F Ratio</h4>
+                        <div class="metric-value" id="mFFRatio">—</div>
+                        <small>Followers ÷ Following</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Video Content %</h4>
+                        <div class="metric-value" id="mVideoPct">—</div>
+                        <small>Reels &amp; videos in scan</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Est. Reach</h4>
+                        <div class="metric-value" id="mEstReach">—</div>
+                        <small>Followers × engagement rate</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Est. Impressions</h4>
+                        <div class="metric-value" id="mEstImpressions">—</div>
+                        <small>Reach × 1.5 multiplier</small>
+                    </div>
+                    <div class="card metric-card">
+                        <h4>Profile Score</h4>
+                        <div class="metric-value" id="mProfileScore">—</div>
+                        <small>Completeness &amp; health (0–100)</small>
+                    </div>
+                </div>
+
+                <!-- ════════════════════════════════════════ -->
+                <!-- ADVANCED ANALYTICS — 40 Signals        -->
+                <!-- ════════════════════════════════════════ -->
+                <div class="section-title">
+                    🧬 40 Advanced Signals (Estimated)
+                    <span class="tooltip-helper" data-tooltip="These metrics are intelligently estimated from available public data and historical patterns. Connect Instagram Graph API for precise values."></span>
+                </div>
+                <p style="color:var(--text-muted);font-size:.8rem;margin-bottom:1rem;">
+                    📊 Estimated from public data &middot; Connect Instagram Graph API for precise values
+                </p>
+
+                <!-- Account Health & Growth -->
+                <div class="section-title">❤️ Account Health &amp; Growth</div>
+                <div class="adv-metric-grid" id="advancedMetricsGrid">
+                    <div class="adv-metric-card">
+                        <div class="adv-metric-label">Loading metrics…</div>
+                        <div class="adv-metric-value">—</div>
+                    </div>
+                </div>
+
+                <!-- Health Status + Growth Velocity + Top Attribution -->
+                <div class="section-title">🎯 Key Performance Anchors</div>
+                <div class="adv-anchor-grid">
+                    <div id="advancedHealthStatus"></div>
+                    <div id="advancedGrowthVelocity"></div>
+                    <div id="advancedTopAttribution"></div>
+                </div>
+
+                <div class="section-title">📋 Complete Metric Breakdown</div>
+                <table class="data-table tooltip-container" style="position:relative;">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                            <th>Source & Methodology</th>
+                        </tr>
+                    </thead>
+                    <tbody id="completeMetricsTableBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Analysis Page -->
+            <div id="analysis" class="page">
+                <div class="page-header">
+                    <h1>🧠 Marketing Intelligence</h1>
+                    <p>AI-powered engagement grading, fake follower detection, and growth recommendations</p>
+                </div>
+
+                <!-- Empty state -->
+                <div id="analysisEmpty" style="color:var(--text-secondary);padding:2rem 0">
+                    Fetch a profile on the Dashboard to see analysis here.
+                </div>
+
+                <div id="analysisContent" style="display:none">
+
+                    <!-- Row 1: Grade + Fake Followers -->
+                    <div class="analysis-hero-row tooltip-container" style="position:relative;">
+
+                        <!-- Engagement Grade Card -->
+                        <div class="card analysis-grade-card tooltip-item" data-tooltip="Engagement Grade (A-F) is calculated by comparing your engagement rate to industry benchmarks for your follower tier. Higher grades indicate stronger audience connection and content resonance">
+                            <div class="analysis-grade-inner">
+                                <div id="maGrade" style="font-size:4rem;font-weight:900;background:var(--grad-text);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-.02em;">—</div>
+                                <div>
+                                    <div style="font-size:.85rem;color:var(--text-muted);margin-bottom:4px">Engagement Grade</div>
+                                    <div id="maGradeDesc" style="font-weight:700;font-size:1.2rem;letter-spacing:.02em;">—</div>
+                                    <div style="font-size:.85rem;color:var(--text-secondary);margin-top:6px">Based on likes+comments vs your follower count compared to industry benchmarks for your tier.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fake Follower Card -->
+                        <div class="card analysis-fake-card tooltip-item" data-tooltip="Fake follower detection estimates the percentage of inactive, bot, or purchased followers based on engagement rate discrepancies. Low engagement relative to follower count often indicates fake or dormant accounts">
+                            <div class="fake-header">
+                                <span style="font-size:1.8rem">🕵️</span>
+                                <div>
+                                    <div style="font-weight:700;font-size:1.2rem">Fake Follower Detector</div>
+                                    <div style="font-size:.8rem;color:var(--text-muted)">Estimated via ER vs tier benchmarks</div>
+                                </div>
+                            </div>
+                            <div class="fake-meter-wrap">
+                                <div class="fake-meter">
+                                    <div class="fake-meter-fill" id="fakeMeterFill" style="width:0%"></div>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--text-muted);margin-top:4px;">
+                                    <span data-tooltip="0% fake followers indicates a highly authentic audience">0% Fake</span><span data-tooltip="50% represents moderate fake follower presence">50%</span><span data-tooltip="90%+ indicates significant fake follower problem">90%+</span>
+                                </div>
+                            </div>
+                            <div class="fake-stats">
+                                <div class="fake-stat tooltip-item" data-tooltip="Percentage of estimated fake/inauthentic followers based on engagement discrepancies">
+                                    <div class="fake-stat-val" id="fakeRatioPct">—</div>
+                                    <div class="fake-stat-lbl">Est. Fake %</div>
+                                    <div class="fake-stat-desc">Based on your ER vs expected ER for your follower tier.</div>
+                                </div>
+                                <div class="fake-stat tooltip-item" data-tooltip="Estimated number of fake, bot, or inactive follower accounts in your audience">
+                                    <div class="fake-stat-val" id="fakeCount">—</div>
+                                    <div class="fake-stat-lbl">Est. Fake Count</div>
+                                    <div class="fake-stat-desc">Estimated ghost/bot accounts in your audience.</div>
+                                </div>
+                                <div class="fake-stat tooltip-item" data-tooltip="Estimated number of real, engaged followers based on engagement patterns and behavior analysis">
+                                    <div class="fake-stat-val" id="authenticCount">—</div>
+                                    <div class="fake-stat-lbl">Authentic Est.</div>
+                                    <div class="fake-stat-desc">Real engaged followers you likely have.</div>
+                                </div>
+                                <div class="fake-stat tooltip-item" data-tooltip="Expected engagement rate benchmark for your follower tier. Comparing yours to this reveals authenticity gaps">
+                                    <div class="fake-stat-val" id="expectedERDisplay">—</div>
+                                    <div class="fake-stat-lbl">Expected ER</div>
+                                    <div class="fake-stat-desc">Benchmark ER for your follower tier. Yours vs this = authenticity gap.</div>
+                                </div>
+                            </div>
+                            <div class="fake-disclaimer" style="margin-top:8px;font-size:.75rem;color:var(--text-muted)">⚠️ Estimate only — a definitive fake follower count requires specialized API tools (HypeAuditor, Modash, IG Audit). Low ER can also mean inactive real followers or audience growth from inactive sources.</div>
+                        </div>
+
+                        <!-- Fake Follower Detailed List -->
+                        <div class="section-title" style="margin-top:1.5rem;">🔍 Suspect Analysis</div>
+                        <div id="fakeFollowerList"></div>
+                    </div>
+
+                    <!-- Row 2: Profile signals -->
+                    <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="Profile signals provide quick insights into account health, content strategy, and posting habits">
+                        📐 Profile Signals
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="stats-grid tooltip-container" style="position:relative;">
+                        <div class="card stat-card tooltip-item" data-tooltip="Audience Quality is calculated from Followers/Following ratio. High ratios (>3:1) suggest authority-focused accounts, while low ratios may indicate follow-back strategies or personal blogs">
+                            <div class="stat-label">Audience Quality</div>
+                            <div class="stat-value tooltip-item" data-tooltip="Quality score based on follower/following ratio" id="maAQLabel" style="font-size:1.2rem;">—</div>
+                            <div class="stat-note">Followers ÷ Following ratio signal</div>
+                        </div>
+                        <div class="card stat-card tooltip-item" data-tooltip="Video content percentage indicates Reels vs photos mix. Instagram's algorithm heavily favors Reels, which can increase reach by up to 3x compared to static posts">
+                            <div class="stat-label">Video Content %</div>
+                            <div class="stat-value tooltip-item" data-tooltip="Percentage of video content in recent posts" id="maVideoRatio">—</div>
+                            <div class="stat-note">Reels get 3× organic reach on average</div>
+                        </div>
+                        <div class="card stat-card tooltip-item" data-tooltip="Caption length affects saves and shares. Optimal range (150-300 chars) provides enough context without overwhelming readers, leading to better save rates">
+                            <div class="stat-label">Avg Caption Length</div>
+                            <div class="stat-value tooltip-item" data-tooltip="Average character count of post captions" id="maAvgCaption">—</div>
+                            <div class="stat-note">150–300 chars = optimal for saves</div>
+                        </div>
+                        <div class="card stat-card tooltip-item" data-tooltip="Posting frequency impacts growth and algorithm favorability. Consistent 3-5 posts per week keeps your audience engaged and signals active account to Instagram's algorithm">
+                            <div class="stat-label">Post Frequency</div>
+                            <div class="stat-value tooltip-item" data-tooltip="Number of posts published in recent period" id="maPostFreq">—</div>
+                            <div class="stat-note">3–5 posts/week recommended for growth</div>
+                        </div>
+                    </div>
+
+                    <!-- Best Post -->
+                    <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="Best performing post is identified by highest engagement rate (likes + comments / followers). This represents your most resonant content">
+                        🏆 Best Performing Post
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="card" style="padding:1.25rem;" id="maBestPost" tooltip-container style="position:relative;">Fetch profile to see best post.<span class="tooltip-helper"></span></div>
+
+                    <!-- Charts -->
+                    <div class="section-title">📊 Content Analysis Charts</div>
+                    <div class="charts-grid tooltip-container" style="position:relative;">
+                        <div class="card chart-card">
+                            <h3>Content Type Mix</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Shows the ratio of photos vs videos/reels in your recent posts. Instagram's algorithm boosts Reels — aim for 40%+ video content to maximize reach and discovery opportunities" style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Photo vs Video ratio in your recent posts</p>
+                            <canvas id="contentMixChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Top Posts by Likes & Comments</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Your highest-performing posts ranked by total engagement. Use these to identify what content style, topic, or format resonates most with your audience" style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Highest-engagement content identification</p>
+                            <canvas id="topPostsChart"></canvas>
+                        </div>
+                        <div class="card chart-card" style="grid-column:span 2;">
+                            <h3>Engagement vs Industry Benchmarks</h3>
+                            <p class="chart-desc tooltip-item" data-tooltip="Your engagement rate plotted against Instagram industry benchmarks by follower tier. The colored bar shows where you fall relative to accounts of similar size" style="margin-bottom:0.75rem;font-size:0.825rem;color:var(--text-secondary);">Industry performance comparison</p>
+                            <canvas id="engagementGaugeChart" style="max-height:240px"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Posting Day Heatmap</h3>
+                            <canvas id="weekdayChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                            <h3>Engagement Mix</h3>
+                            <canvas id="engagementMixChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Growth Recommendations -->
+                    <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="AI-powered recommendations based on your profile data, identifying actionable improvements to boost engagement and growth">
+                        🚀 AI Growth Recommendations
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="card" style="padding:1.5rem;">
+                        <p style="color:var(--text-muted);font-size:.875rem;margin-bottom:1rem">Personalized action items based on your profile data. Each tip targets a specific issue detected and provides concrete steps for improvement.</p>
+                        <div id="maRecommendations" style="display:flex;flex-direction:column;gap:0.75rem;" tooltip-container="style=position:relative;">Fetch profile to see recommendations.<span class="tooltip-helper"></span></div>
+                    </div>
+
+                </div>
+
+                <!-- ════════════════════════════════════════════════════════════════ -->
+                <!-- COMPREHENSIVE POST ANALYSIS MODULE                           -->
+                <!-- Multiple analysis methods: Content Performance, Best Time,    -->
+                <!-- Hashtags, Content Types, Engagement Patterns, Benchmarks      -->
+                <!-- ════════════════════════════════════════════════════════════════ -->
+                <div id="postAnalysisSection" style="margin-top:2rem;">
+                    <div class="section-title tooltip-container" style="position:relative;margin-bottom:0.5rem;" data-tooltip="Comprehensive post analysis using multiple methods: Content Performance Scoring, Best Time Analysis, Hashtag Performance, Content Type Comparison, Engagement Patterns, and Competitor Benchmarking">
+                        🧠 Comprehensive Post Analysis
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <p style="color:var(--text-muted);font-size:.825rem;margin-bottom:1rem;">
+                        Multiple analysis methods combined for the best insights. Uses the most effective method for each scenario.
+                    </p>
+                    <button class="analysis-toggle-btn" id="runPostAnalysisBtn" onclick="window.app && window.app.runComprehensiveAnalysis()">
+                        🚀 Run Comprehensive Analysis
+                    </button>
+                    <div id="postAnalysisResults" style="display:none;">
+                        <!-- Results will be populated by post-analysis.js -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Page -->
+            <div id="history" class="page">
+                <div class="page-header">
+                    <h1>📜 Lookup History</h1>
+                    <p>Track usernames you've searched and their analytics</p>
+                </div>
+                <div id="progressHistoryContainer">
+                    <p style="color:var(--text-secondary)">No history recorded yet.</p>
+                </div>
+                <div class="action-row" style="margin-top:1rem;margin-bottom:1.5rem;">
+                    <button id="clearHistory" class="btn btn-danger">🗑️ Clear History</button>
+                </div>
+                <div class="section-title" style="margin-top:2rem">📊 History Stats</div>
+                <div class="stats-grid" style="max-width:600px;">
+                    <div class="card stat-card">
+                        <div class="stat-label">Total Lookups</div>
+                        <div class="stat-value" id="historyCountDisplay">0</div>
+                    </div>
+                    <div class="card stat-card">
+                        <div class="stat-label">Last Lookup</div>
+                        <div class="stat-value" style="font-size:1.1rem;" id="lastEntryDate">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Projects Page (SmallWorld project inventory) -->
+            <div id="projects" class="page">
+                <div class="page-header">
+                    <h1>🗂️ Projects</h1>
+                    <p>The SmallWorld project inventory — the field guide, every recorded project, the analytics and the latest Instagram scan, in one place</p>
+                </div>
+                <div id="projectsBody"></div>
+            </div>
+
+            <!-- Settings Page -->
+                        <!-- Error Log Page -->
+            <div id="errors" class="page">
+                <div class="page-header">
+                    <h1>Error Log</h1>
+                    <p>Real-time error detection with line numbers and code section tracking</p>
+                </div>
+                <div class="stats-grid" style="max-width:800px;margin-bottom:1rem;">
+                    <div class="card stat-card" style="border-left:3px solid var(--danger);">
+                        <div class="stat-label">Total Errors</div>
+                        <div class="stat-value" id="errTotalCount" style="color:var(--danger);font-size:2rem;">0</div>
+                    </div>
+                    <div class="card stat-card" style="border-left:3px solid var(--warning);">
+                        <div class="stat-label">App Version</div>
+                        <div class="stat-value" id="errVersionDisplay" style="font-size:1.4rem;">--</div>
+                    </div>
+                    <div class="card stat-card" style="border-left:3px solid var(--accent);">
+                        <div class="stat-label">Last Error</div>
+                        <div class="stat-value" id="errLastTime" style="font-size:1rem;color:var(--text-muted);">--</div>
+                    </div>
+                    <div class="card stat-card" style="border-left:3px solid var(--success);">
+                        <div class="stat-label">Boot status</div>
+                        <div class="stat-value" id="errBootStatus" style="font-size:1rem;color:var(--text-muted);">--</div>
+                    </div>
+                </div>
+                <!-- Severity breakdown + suppressed-noise count, so a quiet log can
+                     never hide a real failure. -->
+                <div id="errSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;font-size:.78rem;color:var(--text-secondary);"></div>
+                <div class="err-toolbar" style="display:flex;gap:8px;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
+                    <button id="errClearAllBtn" class="btn btn-danger">Clear All Errors</button>
+                    <button id="errTestBtn" class="btn btn-secondary" style="background:rgba(245,158,11,.15);color:#f59e0b;border-color:rgba(245,158,11,.3);">🧪 Test Error Detection</button>
+                    <span style="flex:1;min-width:10px"></span>
+                    <span id="errLiveIndicator" style="display:flex;align-items:center;gap:4px;font-size:.75rem;color:var(--text-muted);">
+                        <span class="live-dot"></span> Real-time monitoring active
+                    </span>
+                </div>
+                <div class="err-page-container" id="errPageContainer">
+                    <div class="err-empty" id="errEmptyState">
+                        <div style="font-size:3rem;margin-bottom:1rem;">No Errors Found</div>
+                        <div style="font-size:.85rem;color:var(--text-muted);">Errors appear here in real-time as they occur.</div>
+                    </div>
+                    <div id="errListContainer"></div>
+                </div>
+            </div>
+
+<div id="settings" class="page">
+                <div class="page-header">
+                    <h1>⚙️ Settings</h1>
+                    <p>API configuration and preferences with tooltips</p>
+                </div>
+
+                <div class="card" style="max-width:640px; margin-bottom:1.5rem; padding:2rem;">
+                    <div class="section-title tooltip-container" style="margin-top:0;" data-tooltip="Instagram Graph API access unlocks advanced metrics like engagement rate, reach, watch time, and follower growth tracking">
+                        🔌 Instagram Graph API
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <p style="color:var(--text-secondary);font-size:.875rem;margin-bottom:1.5rem;">
+                        Add your Instagram Graph API token to unlock engagement rate, reach, watch time, and growth metrics. Without it, public profile data + post thumbnails/likes are still available.
+                    </p>
+                    <form id="apiSettingsForm">
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="instagramApiUrl" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Graph API URL</label>
+                            <input type="text" id="instagramApiUrl" placeholder="https://graph.instagram.com/" tooltip-item data-tooltip="Your Instagram Graph API endpoint. This is the base URL for all API requests." style="width:100%;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-family:'JetBrains Mono',monospace;">
+                            <small data-tooltip="The base URL for Instagram Graph API requests. Keep this as the default unless you're using a custom endpoint." style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Your Instagram Graph API endpoint</small>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="accessToken" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Access Token</label>
+                            <input type="password" id="accessToken" placeholder="IGQV..." tooltip-item data-tooltip="Your Instagram Graph API access token. This authenticates your requests to the Instagram API." style="width:100%;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-family:'JetBrains Mono',monospace;letter-spacing:.04em;">
+                            <small data-tooltip="Obtain from Facebook Developer Dashboard. Required for Graph API access." style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Your Instagram access token</small>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="igBusinessAccountId" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Business Discovery — your IG account ID</label>
+                            <input type="text" id="igBusinessAccountId" placeholder="17841400000000000" tooltip-item data-tooltip="The Instagram Business/Creator account ID that authorises the call — your own professional account, linked to a Facebook Page. Business Discovery reads another public professional account's posts and real like/comment counts. Leave blank to auto-detect from /me/accounts." style="width:100%;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-family:'JetBrains Mono',monospace;">
+                            <small style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Optional. Used for Business Discovery (accurate post history + engagement). Personal accounts are not readable this way.</small>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="igUsername" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Instagram Username</label>
+                            <input type="text" id="igUsername" placeholder="your_instagram_username" tooltip-item data-tooltip="Your Instagram login username. Required for real unfollow via the Instagram API." style="width:100%;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-family:'JetBrains Mono',monospace;">
+                            <small style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Used for API-based unfollowing of suspected fake followers</small>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="igPassword" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Instagram Password</label>
+                            <input type="password" id="igPassword" placeholder="••••••••" tooltip-item data-tooltip="Your Instagram password. Stored locally only and used solely for API unfollow authentication." style="width:100%;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-family:'JetBrains Mono',monospace;letter-spacing:.04em;">
+                            <small style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Stored securely in local storage. Never sent to third parties.</small>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <button type="button" id="igLoginBtn" class="btn btn-primary" style="width:100%">🔑 Login to Instagram (for Unfollow)</button>
+                            <button type="button" id="igLogoutBtn" class="btn btn-secondary" style="width:100%;margin-top:8px;display:none;">🚪 Logout of Instagram</button>
+                            <div id="igLoginStatus" style="margin-top:8px;font-size:.8rem;color:var(--text-muted);"></div>
+                        </div>
+                        <div class="form-group tooltip-container" style="position:relative;">
+                            <label for="apiTimeout" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Request Timeout (ms)</label>
+                            <input type="number" id="apiTimeout" value="10000" min="1000" max="60000" style="max-width:200px;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);" tooltip-item data-tooltip="Maximum time (in milliseconds) to wait for API responses before timing out. Default is 10 seconds." style="width:100%;">
+                            <small data-tooltip="Longer timeouts prevent premature failures but delay error reporting." style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Adjust timeout as needed</small>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="width:100%">💾 Save API Settings</button>
+                    </form>
+                </div>
+
+                <div class="card" style="max-width:640px; margin-bottom:1.5rem; padding:2rem;">
+                    <div class="section-title tooltip-container" style="margin-top:0;" data-tooltip="Customize app behavior on startup">
+                        ⚙️ Preferences
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:.5rem 0;">
+                            <input type="checkbox" id="autoFetchToggle" style="width:20px;height:20px;accent-color:#7c3aed;cursor:pointer;">
+                            <div>
+                                <div style="font-weight:600;font-size:.95rem;">🔍 Auto-fetch profile on startup</div>
+                                <div style="font-size:.8rem;color:var(--text-muted);">Automatically scan the default profile when the app opens</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="defaultUsernameInput" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.06em;">Default Profile Username</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="color:var(--text-muted);font-weight:700;">@</span>
+                            <input type="text" id="defaultUsernameInput" value="smallworld_foundation" placeholder="username" style="flex:1;padding:.6rem .8rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);font-size:.9rem;">
+                        </div>
+                        <small style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">The profile to auto-fetch on startup. Saved when you click "Save API Settings" above.</small>
+                    </div>
+                </div>
+
+                <div class="card" style="max-width:640px; margin-bottom:1.5rem; padding:2rem;">
+                    <div class="section-title tooltip-container" style="margin-top:0;" data-tooltip="Export/Import allows you to backup your analytics data or restore it on another device">
+                        💾 Data Management
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="action-row">
+                        <button id="exportData" class="btn btn-primary tooltip-btn" data-tooltip="Export all collected analytics data as a JSON file for backup or sharing">📤 Export JSON Data</button>
+                        <label for="importFile" class="btn btn-secondary" style="padding:9px 20px;cursor:pointer;" data-tooltip="Import previously exported JSON data to restore your analytics">📥 Import JSON</label>
+                        <input type="file" id="importFile" style="display:none" accept=".json">
+                        <button id="exportCsvBtn" class="btn btn-secondary tooltip-btn" onclick="window.app && window.app.exportPostsCsv()" data-tooltip="Download the scanned posts as a CSV spreadsheet with ISO dates, engagement counts, hashtags, and direct post URLs">📊 Export Posts CSV</button>
+                        <button id="copySummaryBtn" class="btn btn-secondary tooltip-btn" onclick="window.app && window.app.copyProfileSummary()" data-tooltip="Copy a concise text summary of the current profile (followers, averages, engagement rate) to your clipboard">📋 Copy Summary</button>
+                    </div>
+                </div>
+
+                <div class="card" style="max-width:640px; padding:2rem;">
+                    <div class="section-title tooltip-container" style="margin-top:0;" data-tooltip="Appearance settings control the visual theme and chart styling of the application">
+                        🎨 Appearance
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <div class="form-group tooltip-container" style="position:relative;">
+                        <label for="chartColors" style="display:block;font-size:.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.06em;">Chart Color Scheme</label>
+                        <select id="chartColors" style="width:100%;max-width:320px;padding:.75rem 1rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);background:var(--glass-bg);color:var(--text-primary);" tooltip-item data-tooltip="Choose a color scheme for charts. Default provides a professional violet-to-cyan gradient. Monochrome offers grayscale analysis. Vibrant gives rainbow highlights." style="width:100%;">
+                            <option value="default">Default (Violet → Cyan)</option>
+                            <option value="monochrome">Monochrome Analysis</option>
+                            <option value="vibrant">Vibrant Rainbow Highlights</option>
+                        </select>
+                        <small data-tooltip="Color schemes affect all charts throughout the application." style="display:block;margin-top:.25rem;color:var(--text-muted);font-size:.75rem;">Affects all chart visualizations</small>
+                    </div>
+                </div>
+
+                <!-- Error Log Viewer -->
+                <div class="card" style="max-width:640px; margin-bottom:1.5rem; padding:2rem; border-color: rgba(239, 68, 68, .3)">
+                    <div class="section-title" style="margin-top:0;">
+                        Error Detection
+                        <span class="tooltip-helper"></span>
+                    </div>
+                    <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:.75rem;">
+                        Quick summary of the most recent error. Full error log is available from the sidebar.
+                    </p>
+                    <div id="errorSummary" style="font-size:.85rem;color:var(--text-secondary);margin-bottom:1rem;padding:.5rem .75rem;background:rgba(239,68,68,.08);border-radius:8px;border-left:3px solid var(--danger);min-height:2rem">
+                        No errors detected.
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
+                        <button class="btn btn-secondary" onclick="var el=document.querySelector('[data-page=errors]');if(el)el.click()">Open Error Log</button>
+                        <span style="font-size:.75rem;color:var(--text-muted);">View full error history</span>
+                    </div>
+<div class="card" style="max-width:640px; margin-bottom:1.5rem; padding:2rem; border-color: rgba(124, 58, 237, .3)">
+                    <div class="section-title">💡 How to Use Tooltips</div>
+                    <div style="font-size:.9rem;color:var(--text-secondary);line-height:1.7;">
+                        <p><strong>Hover anywhere</strong> on metric values, labels, or descriptions to see detailed explanations.</p>
+                        <p><strong>Click tooltips</strong> for quick access to what each number means and why it matters.</p>
+                        <p><strong>All metrics include context</strong> — know what they represent and how they're calculated.</p>
+                    </div>
+                </div>            </div>
+        </main>
+    </div>        <!-- Context Menu -->
+    <div id="statContextMenu" class="stat-context-menu" style="display:none"></div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Browser Loading Overlay -->
+    <div id="browserLoadingOverlay" class="browser-loading-overlay hidden">
+        <div class="browser-loading-icon">🌐</div>
+        <div class="browser-loading-spinner"></div>
+        <div class="browser-loading-text" id="browserLoadingText">Launching browser...</div>
+        <div class="browser-loading-sub">Instagram is being loaded in a hidden browser window to fetch profile data</div>
+    </div>
+
+    <!-- Metric Explanation Modal -->
+    <div id="metricExplanationModal" class="metric-modal" style="display:none">
+        <div class="metric-modal-backdrop" id="metricModalBackdrop"></div>
+        <div class="metric-modal-content">
+            <button class="metric-modal-close" id="metricModalClose">✕</button>
+            <div class="metric-modal-body" id="metricModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="node_modules/chart.js/dist/chart.umd.min.js"></script>
+    <script src="node_modules/gsap/dist/gsap.min.js"></script>
+    <!-- Boot diagnostics — MUST load first: captures errors thrown while the other
+         modules load or the app constructs, and verifies every module landed. -->
+    <script src="boot-diagnostics.js"></script>
+    <script src="app.js"></script>
+    <!-- Post Analysis Module - must load after app.js -->
+    <script src="post-analysis.js"></script>
+    <script src="utils.js"></script>
+    <script src="scraping.js"></script>
+    <script src="metrics.js"></script>
+    <script src="charts.js"></script>
+    <script src="ui.js"></script>
+    <!-- Project inventory (guide + inventory table + .xlsx export) -->
+    <script src="project-inventory.js"></script>
+    <script src="instagram-auth.js"></script>
+    <script src="storage.js"></script>
+    <script src="error-handling.js"></script>
+    <script src="animations.js"></script>
+    <script src="context-menu.js"></script>
+    <script>
+        // Proxy wraps the app instance to catch any calls to missing methods
+        // This helps catch 'is not a function' errors early during development
+        var _rawApp = new InstagramAnalytics();
+        var _ignoredProps = { then: 1, catch: 1, 'finally': 1 }; // avoid noise from Promise.resolve(app)
+        window.app = new Proxy(_rawApp, {
+            get: function(target, prop, receiver) {
+                if (prop in target) {
+                    var value = Reflect.get(target, prop, receiver);
+                    if (typeof value === 'function') return value.bind(target);
+                    return value;
+                }
+                // Property doesn't exist — log warning for method-like accesses
+                var propStr = String(prop);
+                if (!(propStr in _ignoredProps) && typeof prop === 'string' && !propStr.startsWith('_') && propStr[0] === propStr[0].toLowerCase()) {
+                    console.warn('[SWA] ⚠️ Missing prototype method: this.' + propStr + '() is not defined. Check module files or loading order.');
+                }
+                return undefined;
+            }
+        });
+    </script>
+
+</body>
+</html>

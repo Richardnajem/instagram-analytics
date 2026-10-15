@@ -1,0 +1,41 @@
+{
+  "name": "swa-small-world-analytics",
+  "version": "1.2.0",
+  "description": "SWA - Small World Analytics for Instagram Insights",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test_full_history.js && node test_scan_orchestration.js && node test_scan_snapshot.js && node test_project_inventory.js && node test_real_data_suggestions.js && node test_error_logging.js && node test_metrics_determinism.js && node test_no_fake_unfollow.js",
+    "test:boot": "electron test_boot_smoke.js",
+    "pack": "electron-builder --dir",
+    "dist": "npm version patch --no-git-tag-version && electron-builder",
+    "dist:minor": "npm version minor --no-git-tag-version && electron-builder",
+    "dist:major": "npm version major --no-git-tag-version && electron-builder",
+    "bump:patch": "npm version patch --no-git-tag-version",
+    "bump:minor": "npm version minor --no-git-tag-version",
+    "bump:major": "npm version major --no-git-tag-version",
+    "gen:icon": "node generate-icon.js",
+    "gen:inventory": "node generate-project-inventory.js"
+  },
+  "build": {
+    "appId": "com.smallworld.analytics",
+    "productName": "Small World Analytics",
+    "icon": "assets/swa_icon.ico"
+  },
+  "keywords": [
+    "instagram",
+    "analytics"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-reload": "^2.0.0-alpha.1",
+    "sharp": "^0.35.3"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "gsap": "^3.15.0"
+  }
+}

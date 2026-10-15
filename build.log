@@ -1,0 +1,11 @@
+  • electron-builder  version=24.13.3 os=10.0.26200
+  • loaded configuration  file=package.json ("build" field)
+  • packaging       platform=win32 arch=x64 electron=28.3.3 appOutDir=dist\win-unpacked
+  • downloading     url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z size=5.6 MB parts=1
+  • downloaded      url=https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z duration=1.39s
+  ⨯ cannot execute  cause=exit status 1
+                    errorOut=Fatal error: Unable to commit changes
+
+                    command='C:\Users\richa\AppData\Local\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0\rcedit-x64.exe' 'C:\Users\richa\OneDrive\Desktop\Instagram Analytics\dist\win-unpacked\Small World Analytics.exe' --set-version-string FileDescription 'Small World Analytics' --set-version-string ProductName 'Small World Analytics' --set-version-string LegalCopyright 'Copyright © 2026 Small World Analytics' --set-file-version 1.1.6 --set-product-version 1.1.6.0 --set-version-string InternalName 'Small World Analytics' --set-version-string OriginalFilename '' --set-icon 'C:\Users\richa\OneDrive\Desktop\Instagram Analytics\assets\swa_icon.ico'
+                    workingDir=
+  • Above command failed, retrying 3 more times
