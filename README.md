@@ -30,6 +30,110 @@ through its other sources and reports what it could not reach.
 there is none. Packaged builds are deliberately **not** committed: the portable
 installer is far larger than GitHub's 100 MB per-file limit.
 
+## Online preview — a link to hand to testers
+
+`npm run build:web` turns the **same** `index.html`, stylesheets and modules into
+a plain static site in `web/`, which anyone can open in a browser — no install, no
+server runtime, no account. Upload the **contents** of `web/` to any static host
+(or drag the folder onto one) and send the URL.
+
+| Command | What it does |
+|---|---|
+| `npm run build:web` | Assembles `web/` (add `--no-header` to skip the header lookup below) |
+| `npm run serve:web` | Serves `web/` on <http://127.0.0.1:4173> so you can check it first |
+| `npm run test:web` | Loads `web/` in the Chrome/Edge on this machine and asserts it really works |
+| `npm run deploy:web` | Builds, publishes `web/` to Vercel, then **verifies the live URL** and prints it |
+
+`npm run test:web` is the web equivalent of `npm run test:boot`: it boots the
+page in a real browser and checks that it comes up with an empty error log, shows
+the real coverage, renders every post, draws the charts, refuses scanning
+honestly, and can import a tester's own scan file. With no Chrome/Edge installed
+it skips with a message instead of reporting a pass it did not earn.
+
+### Put it on a public URL
+
+```bash
+npm run build:web    # 1. build web/ and check it locally with `npm run serve:web`
+npm run test:web     # 2. prove the built copy works in a real browser
+npm run deploy:web   # 3. build, publish, verify the live URL, print it
+node test_web_smoke.js --url https://swa-preview-one.vercel.app   # re-check any deployed copy
+```
+
+`deploy:web` (`deploy-web.js`) runs the Vercel CLI through `npx` (nothing to install
+globally) and
+publishes the folder to the `swa-preview` project, so the URL is stable across
+deploys: **<https://swa-preview-one.vercel.app>** (the Vercel project also owns
+<https://swa-preview-insta-5bc1.vercel.app>; the team-scoped one is not worth
+sharing). It logs in on first use — the CLI prints a device URL, you approve it in
+the browser once. `web/` stays git-ignored and is uploaded as-is: **no build runs
+on the host**, so the deployed bytes are the exact bytes `test:web` just checked.
+
+As its last step `deploy:web` runs `test_web_smoke.js --url <the live URL>`, which
+fetches everything the deployment is serving, compares it byte for byte with the
+build that was just uploaded, and then runs the full browser suite. A deployment
+that went stale, half-uploaded or kept an old file fails **there** rather than in
+front of the person you sent the link to (`--no-verify` skips the check).
+The `-one` suffix is not a typo: `swa-preview.vercel.app` is already taken by
+another Vercel account, and it serves a **different app**, so share the `-one`
+link.
+
+Deployment protection has to stay **off** for the link to be shareable:
+
+```bash
+npx vercel project protection disable swa-preview --sso
+```
+
+Prefer a different host? The build output is plain static files with relative
+paths, so the **contents** of `web/` also drop straight onto Netlify, Cloudflare
+Pages, GitHub Pages or any static server.
+
+### What works online, and what does not
+
+Online: the whole dashboard, post grid, per-post *Comprehensive Analysis*, all
+metrics and charts, the Projects tab and its exports, theme switching, the error
+log, and importing a scan file.
+
+**Not** online: live scanning. Instagram refuses anonymous cross-origin requests
+(401/CORS), so a browser page cannot walk a profile — a fake result would be worse
+than none. So in the preview:
+
+- auto-fetch is switched off, and the Scan buttons answer with where scanning
+  *does* work instead of failing with a network error;
+- a notice at the top of every page states what the screen is showing, and the
+  freshness strip still says **saved scan** (with the age of the data).
+
+### What data does it show?
+
+The preview ships a **real saved scan** as `preview-scan.json`. `build-web.js`
+picks, in order: the committed `preview-scan.json` → the newest scan the desktop
+app checkpointed to its user-data folder → the shipped `smallworld_scan_results.json`
+and keeps the committed snapshot in step, so the build is reproducible on another
+machine.
+
+Nothing is fabricated. A partial walk stays labelled partial with its reason, a
+value that was never captured stays `—`, and if the scan carried no profile header
+(followers / following / post totals) the build reads it once off the live profile
+page in the local browser and says so in the notice. `--no-header` skips even that.
+
+### Testers can bring their own account
+
+Drop a scan `.json` anywhere on the page, or use Settings → **📥 Import JSON**.
+`web-preview.js` widens the importer beyond the `{profile, posts}` file the desktop
+Settings page accepts, so every shape the app itself can produce loads:
+
+| File | Where it comes from |
+|---|---|
+| `{profile, posts[]}` | the shipped scan file / an exported scan |
+| `{username, posts[], complete, …}` | the desktop app's `scan-cache/<user>.json` |
+| `{accounts: {…}}` | the saved-scan library |
+
+Everything a tester does stays in **their own browser's** storage; the page
+uploads nothing.
+
+> The preview is read-only by design. To scan a *new* profile with real numbers,
+> use the desktop app (`npm start` or the `.exe`) — it reads the profile in a real
+> browser window and walks the feed to the account's first post.
+
 ## Features
 
 ### Metrics Tracked
@@ -176,12 +280,14 @@ page states how many posts the findings are based on.
 ```bash
 npm test          # pagination, scan orchestration, saved-scan snapshots, project inventory, real-data advice, error logging, metric determinism
 npm run test:boot # launches the real index.html in Electron and asserts a clean boot
+npm run test:web  # builds web/ and loads it in a real browser, asserting the shared preview works
 ```
 
 ## Installation
 
 1. Clone or download this folder to your desired location
-2. Open `index.html` in any modern web browser
+2. Open `index.html` in any modern web browser — or `npm run build:web` and share
+   the `web/` folder as a link (see *Online preview* above)
 3. No server required - runs entirely client-side!
 
 ## Usage
@@ -258,6 +364,12 @@ so load order matters (`boot-diagnostics.js` must come before `app.js`).
 ├── boot-diagnostics.js        # Boot-time capture and module-load verification
 ├── animations.js              # Intro overlay, entrance and scroll animations
 ├── context-menu.js            # Right-click menus and metric tooltips
+├── web-preview.js             # Browser shim: no-op in Electron, makes index.html work as a web page
+├── build-web.js               # Assembles the shareable static site into web/
+├── serve-web.js               # Zero-dependency static server for checking web/ locally
+├── deploy-web.js              # Build → publish to Vercel → verify the live URL
+├── web-tools.js               # Chrome/Edge discovery, shared by the build and the web test
+├── test_web_smoke.js          # Loads web/ in a real browser and asserts it works
 ├── styles.css                 # Styling, including post-analysis.css for the panel
 ├── instaloader_helper.py      # Optional Python full-history path
 └── test_*.js                  # Test suites for `npm test` and `npm run test:boot`

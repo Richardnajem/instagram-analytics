@@ -1130,6 +1130,10 @@
     <!-- Boot diagnostics — MUST load first: captures errors thrown while the other
          modules load or the app constructs, and verifies every module landed. -->
     <script src="boot-diagnostics.js"></script>
+    <!-- Web preview shim — no-op inside Electron, makes this same page work when
+         it is opened in a browser (see the file header). Must load before app.js
+         so it can disable auto-fetch before boot reads settings. -->
+    <script src="web-preview.js"></script>
     <script src="app.js"></script>
     <!-- Post Analysis Module - must load after app.js -->
     <script src="post-analysis.js"></script>

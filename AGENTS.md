@@ -46,6 +46,12 @@ modules call, it does not need to be in that list, but a missing one is surfaced
 | Right-click context menus and metric tooltips | `context-menu.js` |
 | Electron main process, window, IPC (`scrape-instagram-profile`) | `main.js` |
 | Markup / DOM ids / script order | `index.html` |
+| **Online (browser) preview** — notice, saved-scan bootstrap, honest scan refusal, scan-file import | `web-preview.js` |
+| Building the shareable static site / which real scan it bundles | `build-web.js` |
+| Serving the built preview locally | `serve-web.js` |
+| Publishing the preview to a public URL (and proving it) | `deploy-web.js` (`npm run deploy:web`), documented in README §Online preview |
+| Chrome/Edge discovery for the build + web test | `web-tools.js` |
+| Checking a DEPLOYED copy against this build (`test_web_smoke.js --url <base>`) | `test_web_smoke.js` |
 
 ## Data-honesty rules (do not break these)
 
@@ -80,11 +86,31 @@ handles runtime errors: severity-classified, de-duplicated with a repeat counter
 stack traces kept, library noise suppressed **with a visible count** so a quiet log
 can't hide a problem. Missing fonts/images are tracked separately as asset failures.
 
+## The online preview (`web/`)
+
+`npm run build:web` copies this renderer into a static site in `web/` so a link can
+be sent to testers; `web-preview.js` (loaded from `index.html` right before
+`app.js`) is what makes that safe:
+
+- it **returns immediately inside Electron** — the desktop app is untouched;
+- it switches auto-fetch off *before* boot reads settings (it registers its
+  `DOMContentLoaded` hook before `app.js` does), so a browser page never tries a
+  scan it cannot do;
+- it loads the bundled **real** scan and patches the scan methods to explain,
+  rather than fail, that scanning needs the desktop app;
+- it widens `importData` to every scan shape the app can produce.
+
+Rules that must not break: the preview never fabricates a value (a partial walk
+stays labelled partial, unknowns stay `—`, and the notice names where the profile
+counts came from), and `web/` is generated output (git-ignored) — edit the sources,
+not the copy.
+
 ## Tests
 
 ```bash
 npm test          # pagination, scan orchestration, saved-scan snapshots, project inventory, real-data advice, error logging, determinism, unfollow honesty
 npm run test:boot # launches the real index.html in Electron and asserts a clean boot
+npm run test:web  # builds web/ and loads it in a real browser (Chrome/Edge) to prove the shared preview works
 npm run gen:inventory # rewrites SmallWorld-Project-Inventory.xlsx from project-inventory.js
 ```
 

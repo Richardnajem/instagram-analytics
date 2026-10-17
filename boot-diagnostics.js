@@ -48,8 +48,20 @@
     window.addEventListener('error', function (e) {
         var isJsError = !!(e && (e.message || (e.error && e.error.message)));
         if (!isJsError) {
+            // Report the ASSET that failed, not the page it failed on. For a
+            // resource error Chrome sets `filename` to the document URL and puts
+            // the real element in `target`, so reading `filename` first logged
+            // "index.html" for every missing image — which made the asset log
+            // useless (and hid a broken local script from the boot check).
+            var el = e && e.target;
+            var url = (el && (el.currentSrc || el.src || el.href)) || '';
+            // An empty src resolves to the document URL, so an `<img src="">` that
+            // has not been filled in yet is not a failed asset — counting it would
+            // put a permanent false "asset failed" line in the error log.
+            if (url && url === location.href) return;
             pushResource({
-                url: (e && (e.filename || (e.target && (e.target.src || e.target.href)))) || 'unknown',
+                url: url || (e && e.filename) || 'unknown',
+                tag: (el && el.tagName) || null,
                 at: Date.now(),
             });
             return;

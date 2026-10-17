@@ -223,16 +223,19 @@ P.importData = function(event) {
                     if (!isNaN(parsed.getTime())) timestamp = Math.floor(parsed.getTime() / 1000);
                 }
 
-                // Map type string to postType
-                const typeStr = (p.type || '').toLowerCase();
+                // Map type string to postType. `type` is the GraphQL-style name
+                // ('GraphImage'/'GraphVideo'/'GraphSidecar'/…); a scan the app
+                // checkpointed to disk instead carries the resolved `postType`
+                // and `isVideo`, so read both — reading only `type` silently
+                // turned every reel, video and carousel in a restored scan into a
+                // photo, which then skewed the format mix and the video %.
+                const typeStr = String(p.type || p.postType || '').toLowerCase();
                 let postType = 'photo';
-                let isVideo = false;
-                if (typeStr.includes('reel') || typeStr.includes('video')) {
-                    postType = typeStr.includes('reel') ? 'reel' : 'video';
-                    isVideo = true;
-                } else if (typeStr.includes('carousel')) {
-                    postType = 'carousel';
-                }
+                let isVideo = p.isVideo === true;
+                if (typeStr.includes('reel')) postType = 'reel';
+                else if (typeStr.includes('video')) postType = 'video';
+                else if (typeStr.includes('carousel') || typeStr.includes('sidecar')) postType = 'carousel';
+                if (postType === 'reel' || postType === 'video') isVideo = true;
 
                 return {
                     shortcode: p.shortcode || '',
@@ -244,7 +247,9 @@ P.importData = function(event) {
                     postType,
                     carouselCount: p.carouselCount || 0,
                     timestamp,
-                    views: p.videoViews || null,
+                    // Both spellings exist in real scan files: the feed API writes
+                    // `videoViews`, the CLI scanners write `videoViewCount`.
+                    views: p.videoViews ?? p.videoViewCount ?? null,
                     location: p.location || null,
                 };
             });
