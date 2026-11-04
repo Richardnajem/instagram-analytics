@@ -18,3 +18,6 @@ web/
 # Python bytecode cache
 __pycache__/
 
+# Agent attachments / transient downloads
+.cloud-attachments/
+

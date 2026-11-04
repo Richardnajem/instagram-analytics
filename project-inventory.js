@@ -3,20 +3,21 @@
 
    What this module is for
    ----------------------
-   Turns the agreed *field guide* below into a working inventory: the guide is
-   rendered as a two-column table (Field / What to record in each field) and the
-   same fields become the columns of the inventory, one row per project. The
-   inventory can be exported as a real .xlsx workbook.
+   Turns the fields of SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx
+   into a working inventory: the guide is rendered as a two-column table
+   (Field / What to record in each field) and the same fields become the columns
+   of the inventory, one row per project. The inventory can be exported as a real
+   .xlsx workbook.
 
    Data-honesty rules (see AGENTS.md §"Data-honesty rules")
    -------------------------------------------------------
-   1. Nothing is invented. Every value is either taken from a named source or
-      shown as "—". Where a value is unknown the row's "Missing information"
-      cell says what is still needed.
-   2. Sources are named per row (the File location column) so each entry can be
-      checked. The Sources panel states what was reachable and what was not.
-   3. Instagram captions could not be read without a signed-in session, so no
-      caption text is used anywhere in this inventory.
+   1. Nothing is invented. Every value is either recorded in the workbook or
+      shown as "—". A blank workbook cell stays blank, it is not given a
+      plausible value.
+   2. The field list and the column order are the workbook's own, so the tab,
+      the export and the tracker cannot drift apart.
+   3. The workbook is the source of truth here. The old website-, Instagram- and
+      photo-archive-derived rows were deleted rather than mixed with it.
 
    Runtime notes
    -------------
@@ -29,663 +30,306 @@
     'use strict';
 
     /* ── The field guide ──────────────────────────────────────────────────
-       These 16 fields (in this order) are the guide, the table columns and the
-       spreadsheet columns. Order matters: it is the column order in the xlsx. */
-    var FIELDS = [
-        { key: 'id',          field: 'Project ID',              what: 'A unique code to identify each project.' },
-        { key: 'year',        field: 'Year',                    what: 'The year of the project.' },
-        { key: 'name',        field: 'Project name',            what: 'The recorded project name; if none exists, use a descriptive title.' },
-        { key: 'country',     field: 'Country',                 what: 'The country supported by the project.' },
-        { key: 'location',    field: 'Location',                what: 'The state, city, town or community where the project took place.' },
-        { key: 'org',         field: 'Beneficiary organization', what: 'The name of the institution receiving the support.' },
-        { key: 'instType',    field: 'Institution type',        what: 'School, orphanage, organization or program.' },
-        { key: 'description', field: 'Brief description',       what: 'A short explanation of what SmallWorld supported.' },
-        { key: 'category',    field: 'Support category',        what: 'School supplies, computers, teaching, scholarships or other support.' },
-        { key: 'beneficiaries', field: 'Beneficiaries',         what: 'Number of children supported; ages, boys/girls and school grades, where documented.' },
-        { key: 'donation',    field: 'Donation',                what: 'The amount contributed and the currency.' },
-        { key: 'deliveryDate', field: 'Delivery date',          what: 'The recorded date when the support was delivered.' },
-        { key: 'status',      field: 'Project status',          what: 'Planned, in progress, delivered or closed.' },
-        { key: 'documentation', field: 'Available documentation', what: 'Agreements, receipts, photographs and reports available for the project.' },
-        { key: 'fileLocation', field: 'File location',          what: 'A link to the folder or original source containing the project information.' },
-        { key: 'missing',     field: 'Missing information',     what: 'Information or documents that still need to be located or confirmed.' }
+       The fields of SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx, in
+       the workbook's own order: the 16 rows of its “Field Guide” sheet, plus
+       the “Duration of project” column the “Project Inventory” sheet records
+       as its 17th column. Order matters: it is the column order in the table
+       and in the exported workbook. */
+    var BUILTIN_FIELDS = [
+        { key: 'id',          field: 'Project ID',              what: 'A unique reference for identification, tracking and cross-referencing. Format: two-letter country code, a 2-digit number for the project’s place in that country for the year (01, 02, 03, 04…), then the last two digits of the year — e.g. UK0126. XX means the country is not recorded.' },
+        { key: 'year',        field: 'Year',                    what: 'The year the project was initiated or delivered, used to organise the records.' },
+        { key: 'name',        field: 'Project name',            what: 'The official project title, for identification and reporting. If none exists, use a descriptive title.' },
+        { key: 'country',     field: 'Country',                 what: 'The country supported by the project (its own column).' },
+        { key: 'location',    field: 'Location',                what: 'The city, town, state or specific area where the project was implemented (its own column).' },
+        { key: 'org',         field: 'Beneficiary organization Name', what: 'The partner organisation, school, institution or entity receiving the support.' },
+        { key: 'instType',    field: 'Institution type',        what: 'The classification of the beneficiary: school, charity, NGO, community organisation, or another institution.' },
+        { key: 'description', field: 'Brief description',       what: 'A concise overview of the project’s objectives, activities and intended impact.' },
+        { key: 'category',    field: 'Support category',        what: 'The type of assistance provided — education, school development, a financial donation, learning resources, or another kind of support.' },
+        { key: 'beneficiaries', field: 'Beneficiaries',         what: 'The number and, where available, the categories of people reached — including gender and age range.' },
+        { key: 'donation',    field: 'Donation in pounds',      what: 'The recorded financial contribution in pounds (£), exactly as the workbook states it.' },
+        { key: 'deliveryDate', field: 'Delivery date',          what: 'The date the support was delivered or the project was completed, where available.' },
+        { key: 'status',      field: 'Project status',          what: 'The current or historical stage: planned, ongoing, completed, pending verification, or the wording the workbook uses.' },
+        { key: 'documentation', field: 'Available documentation', what: 'The supporting evidence held: reports, photographs, videos, agreements, invoices and correspondence.' },
+        { key: 'fileLocation', field: 'File location',          what: 'The folder, database or shared-drive location where the supporting material can be accessed.' },
+        { key: 'missing',     field: 'Missing information',     what: 'Outstanding details, documents, figures or confirmations needed to complete the project record.' },
+        { key: 'duration',    field: 'Duration of project',     what: 'The implementation period, including start and end dates where available (the workbook may state it as “2 years”).' }
     ];
 
-    /* ── Source shortcuts used in the rows below ─────────────────────────── */
-    var SITE = 'https://www.smallworldfoundation.com/';
-    function web(page) { return 'Website — ' + page + ': ' + SITE + page; }
-    /* ── Where the recorded sources actually live ──────────────────────────
-       The row data below records WHERE each source was found, which is
-       documented fact and is kept. What is not portable is one machine's folder
-       prefix, so the prefix is resolved at load rather than baked into every
-       path: point the app at your own copy of the archive (Projects tab →
-       Field guide & sources) and every recorded location follows it. Left
-       unset, the recorded default below is shown as the documented location
-       and rows fall back to a generated tile instead of a photograph the app
-       cannot reach. */
-    var CAMERA_ROOT_KEY = 'swaCameraProjectsRoot';
-    var RECORDED_CAMERA_ROOT = 'C:\\Users\\richa\\OneDrive\\Desktop\\CAMERA PROJECTS\\';
-
-    function cameraRootSetting() {
-        try {
-            return ((typeof localStorage !== 'undefined') && localStorage.getItem(CAMERA_ROOT_KEY)) || '';
-        } catch (e) { return ''; }
-    }
-
-    function resolveCameraRoot() {
-        var saved = cameraRootSetting();
-        if (saved) return String(saved).replace(/[\\/]+$/, '') + '\\';
-        return RECORDED_CAMERA_ROOT;
-    }
-
-    var CAMERA_ROOT = resolveCameraRoot();
-    var GALA = CAMERA_ROOT + 'GALA\\';
-    var SWDOCS = CAMERA_ROOT + 'Smallworld\\';
-    var IG = 'Instagram @smallworld_foundation: https://www.instagram.com/smallworld_foundation/';
-
-    var MISS_WEB = 'Beneficiary organisation, exact location, child count/ages, amount and currency, delivery date, and the agreement/receipt — the source is a one-line website summary.';
-    var MISS_WEB_GALA = MISS_WEB + ' No gala photograph is linked to this project yet, although the GALA folder holds the 2011–2016 event archive.';
+    /* ── The columns actually on screen ───────────────────────────────────
+       Every workbook column is shown until it is hidden, plus any column added
+       in this app (text or dropdown). The array is rebuilt IN PLACE so every
+       holder of it — the table, the exports, the Node API — sees the current
+       set without needing a reference refresh. The workbook columns themselves
+       are never deleted, only hidden: the source data stays intact and can be
+       shown again at any time. */
+    var FIELDS = BUILTIN_FIELDS.slice();
 
     /* ── Inventory rows ───────────────────────────────────────────────────
-       Arrays, in FIELDS order. "—" always means "not documented in the
-       available sources" (never a guess). */
+       Transcribed from “Project Inventory” in
+       SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx (rows 5–21 and the
+       2011 entry at row 31). Text is trimmed, nothing is reworded, and a blank
+       cell is stored as “—” — no value is invented. The workbook's Project ID
+       column is blank, so each row carries the requested client ID: country code
+       (UK, AE; XX where the country is blank), a 2-digit number for that
+       project's place in the country for the year (01, 02, 03, 04…), then the
+       last two digits of the year — UK0125 is the first UK project of 2025.
+       The number restarts for each country and year, and a project added in the
+       app takes the next free one.
+
+       The earlier website-, Instagram- and photo-archive-derived rows were
+       removed: the workbook is the agreed source of truth for this tab.
+       Arrays are in FIELDS order. */
     var PROJECTS = [
-        /* ── 2011 ─────────────────────────────────────────────────────────── */
-        ['SW-2011-001', '2011', 'Nutrition education programme', 'Australia', '—', '—', 'Program',
-            'Supported nutrition education for children, families and the community, helping them make healthier food choices.',
-            'Teaching', 'Children, families and the community — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only); no agreement, receipt or report attached', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-002', '2011', 'Education and health care for 100 children', 'Bosnia', '—', '—', 'Program',
-            'Provided proper education for 100 children and access to health and medical care for 100 children (reported as one Bosnia entry).',
-            'Teaching + other support', '100 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'),
-            'Whether the education and health-care lines describe the same 100 children or two grants; beneficiary organisation; location; amount and currency; delivery date.'],
-
-        ['SW-2011-003', '2011', 'Integrated General & Vocational (IGV) schools', 'Bangladesh', '—',
-            '2 Integrated General & Vocational (IGV) schools and 10 technical schools', 'School',
-            'Provided integrated general and vocational education, skills training and employment support.',
-            'Teaching', 'Students across 12 schools — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-004', '2011', 'Vocational skills training', 'Palestine', '—', '—', 'Program',
-            'Developed secretarial and administrative skills, beauty, hand embroidery and machine sewing skills for children.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-005', '2011', 'Conductive education for children with motor disabilities', 'Hungary', '—', '—', 'Program',
-            'Supported the education of persons with motor disabilities through conductive education and pedagogical rehabilitation.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-006', '2011', 'Mental and physical well-being of foster children', 'Indonesia', '—', '—', 'Program',
-            'Supported 20 foster children with their mental and physical well-being.',
-            'Other support', '20 foster children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-007', '2011', 'Foster children support package', 'Jordan', '—', '—', 'Program',
-            'Covered the expenses of 20 foster children, including clothing, medical and education expenses.',
-            'Other support', '20 foster children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-008', '2011', 'Social-emotional learning programme', 'Panama',
-            'Chorrillo, San Felipe, Santa Ana and Barraza (Panama City)', '9 at-risk-area schools (partner not named)', 'School',
-            'Delivered a social-emotional learning programme to 1,300 children in 9 schools located in at-risk areas.',
-            'Teaching', '1,300 children (grades 4–5)', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html') + ' | ' + web('america.html'), MISS_WEB],
-
-        ['SW-2011-009', '2011', 'Arts and creativity classes', 'Armenia', '—', '—', 'Program',
-            'Supported 100 children in classes for dance, painting, photography, embroidery, theatre arts, poetry, storytelling, woodcraft, miniature and singing, art therapy and English.',
-            'Teaching', '100 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-010', '2011', 'Smile Park mobile playground', 'Japan', 'Fukushima', '—', 'Program',
-            'Built the largest-scale mobile indoor playground to reach 2,334 children affected by the Fukushima nuclear accident.',
-            'Other support', '2,334 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-011', '2011', 'Children’s hospice auditorium', 'Kuwait', '—', 'Bayt Abdullah Children’s Hospice', 'Organization',
-            'Funds were dedicated to building an auditorium — a space where children with terminal illnesses and their families can gather and learn.',
-            'Other support (construction)', 'Over 500 children and their families', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html') + ' | ' + web('middleeast.html'), MISS_WEB],
-
-        ['SW-2011-012', '2011', 'Sports competitions for children', 'Ukraine', '—', '—', 'Program',
-            'Organised sports competitions for 633 children.',
-            'Other support', '633 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-013', '2011', 'Free cleft lip/palate surgeries', 'China', '—', '—', 'Program',
-            'Supported surgeries free of charge for children born with CLP from low-income families. The same page also records support for childhood cancer research.',
-            'Other support (medical)', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-014', '2011', 'Nutrition and health care', 'Colombia', '—', '—', 'Program',
-            'Provided nutrition and health care for 70 children.',
-            'Other support', '70 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html'), MISS_WEB],
-
-        ['SW-2011-015', '2011', 'Autism assessments and therapy', 'Lebanon', '—', 'Lebanese Autism Society', 'Organization',
-            'Provided psychological and special-education assessments around Lebanon plus psychomotor and speech therapy and special-education intervention sessions.',
-            'Other support', 'Children with autism — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html') + ' | ' + web('middleeast.html'), MISS_WEB],
-
-        ['SW-2011-016', '2011', 'Hearing aids for children with disabilities', 'Turkey', '—',
-            'TESYEV — Disabled Sports Support and Education Foundation', 'Organization',
-            'Provided handicapped children with hearing aids and supported the development of activities for disabled children.',
-            'Other support', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html') + ' | ' + web('middleeast.html'), MISS_WEB],
-
-        ['SW-2011-017', '2011', 'Childhood cancer research grant', 'USA', '—', 'Alex’s Lemonade Stand', 'Organization',
-            'Dedicated a fund to the NGO in order to support childhood cancer research.',
-            'Other support (grant)', 'Not applicable — research grant', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2011achievements.html') + ' | ' + web('america.html'), MISS_WEB],
-
-        ['SW-2011-018', '2011', 'Walkathon 2011', 'UAE', 'Abu Dhabi', '—', 'Program (awareness campaign)',
-            'First walkathon, led by H.E. Sheikh Nahyan Mubarak Al Nahyan; every participant signed a petition against child slavery and child abuse.',
-            'Other support (awareness)', 'Not applicable — awareness campaign', '—', '2011', 'Delivered (as reported)',
-            'Website campaigns entry (text only)', web('campaigns.html'), MISS_WEB],
-
-        /* ── 2012 ─────────────────────────────────────────────────────────── */
-        ['SW-2012-001', '2012', 'Vocational training courses', 'Egypt', '—', '—', 'Program',
-            'Provided vocational training to 10 underprivileged children in mechanics, carpentry, accessory making and hairdressing to open future job opportunities.',
-            'Teaching', '10 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-002', '2012', 'Vocational training courses', 'Colombia', '—', '—', 'Program',
-            'Provided vocational training to 7 children in integral coiffure, food manipulation, finance, accounting and music.',
-            'Teaching', '7 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-003', '2012', 'School enrolment preparation', 'India', 'Harijan community', 'Association Aangan', 'Program',
-            'Helped prepare 288 children for enrolment in public schools by providing vocational and semi-educational courses.',
-            'Teaching', '288 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html') + ' | ' + web('visitsontheground.html'),
-            'Beneficiary org confirmed as Association Aangan; exact city/town, amount and currency, delivery date and agreement/receipt still needed.'],
-
-        ['SW-2012-004', '2012', 'School-year sponsorship and home sanitation', 'Italy', '—', '—', 'Program',
-            'Sponsored 10 children to attend the school year 2012/2013 and enrol in different schools, and improved health conditions by organising works to the toilets and septic tanks of the children’s houses.',
-            'Scholarships + other support', '10 children', '—', 'School year 2012/2013', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-005', '2012', 'Vocational training and non-formal education', 'Bangladesh', '—', '—', 'Program',
-            '27 children who are victims of abandoned parents or family disintegration benefited from vocational training and non-formal education support.',
-            'Teaching', '27 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-006', '2012', 'Two-year child sponsorship', 'Jordan', '—', '—', 'Program',
-            'Sponsored 3 children for two consecutive years, giving them the chance to get their education and protection from exploitation.',
-            'Scholarships', '3 children', '—', 'Two consecutive years (start year not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'),
-            'Start year of the two-year term; beneficiary organisation; location; amount and currency; agreement/receipt.'],
-
-        ['SW-2012-007', '2012', 'One-year education support', 'Lebanon', '—', '—', 'Program',
-            'Supported and educated 17 children for one year, reinforcing the educative role of their families.',
-            'Teaching', '17 children', '—', 'One year (start date not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-008', '2012', 'Education and skills for 34 children', 'Mexico', '—', 'DIF Torreon', 'Organization',
-            'Helped 34 children get their education and acquire a skill for a normal, happy and secure life.',
-            'Teaching', '34 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html') + ' | ' + web('america.html'), MISS_WEB],
-
-        ['SW-2012-009', '2012', 'Child sponsorship', 'Panama', '—', 'Panamanian non-profit partner (not named)', 'Organization',
-            'Sponsored 5 children and helped them get proper education to secure their future.',
-            'Scholarships', '5 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'),
-            'Partner organisation name; location; amount and currency; delivery date; agreement/receipt.'],
-
-        ['SW-2012-010', '2012', 'School and college sponsorship', 'Philippines', '—', '—', 'Program',
-            'Sponsored 12 children and helped them get education in schools, supporting many of them throughout college education.',
-            'Scholarships', '12 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-011', '2012', 'Child-education department for trafficking victims', 'UAE', '—', 'EWA’A (EWAA Center)', 'Organization',
-            'Initiated a child education department responsible for educating the victims of human trafficking.',
-            'Program (services)', 'Victims of human trafficking — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'), MISS_WEB],
-
-        ['SW-2012-012', '2012', 'Long-term education sponsorship', 'Ukraine', '—', '—', 'Program',
-            'Gave 17 children of various ages the chance to get education for five to six years depending on their age.',
-            'Scholarships', '17 children', '—', 'Five to six years (start date not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2012achievements.html'),
-            'Start year of the multi-year sponsorship; beneficiary organisation; amount and currency; agreement/receipt.'],
-
-        /* ── 2013 ─────────────────────────────────────────────────────────── */
-        ['SW-2013-001', '2013', 'Gala Dinner and Grand Event (Ricky Martin)', 'UAE', 'Abu Dhabi', '—', 'Program (fundraising event)',
-            'Gala dinner hosting more than 500 guests and the SmallWorld Grand Event with more than 1,000 guests, with Mega Star Ricky Martin supporting as a philanthropist. Funds were raised to educate children in more than 15 countries worldwide.',
-            'Other support (fundraising)', 'Not applicable — fundraising event', '— (amount raised not published)', '2013', 'Delivered (as reported)',
-            'Website achievements entry; photo archive of the gala/celebrity nights (6,373 files, 2011–2016) and a short Ricky Martin bio document',
-            web('2013achievements.html') + ' | ' + GALA + 'Celebrities\\Ricky Martin\\ | ' + GALA + 'SMALLWORLD CELEBRITY\\',
-            'Total raised and the specific country projects the proceeds funded; which photo sub-folder documents which night; the amount has to come from a receipt or bank record, not the event write-up.'],
-
-        ['SW-2013-002', '2013', 'Sponsorship of 34 children', 'Mexico', '—', 'DIF Torreon', 'Organization',
-            'Sponsored 34 children with extreme cases of poverty, sexual and emotional abuse and helped them get proper school education, saving them from exploitation.',
-            'Scholarships', '34 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2013achievements.html') + ' | ' + web('america.html'), MISS_WEB],
-
-        ['SW-2013-003', '2013', 'Sponsorship of orphan teenage girls', 'Panama', '—', '—', 'Organization',
-            'Supported the education of 5 orphan teenage girls from abusive family backgrounds to help them become productive members of their communities.',
-            'Scholarships', '5 orphan teenage girls', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2013achievements.html'), MISS_WEB],
-
-        ['SW-2013-004', '2013', 'University sponsorship', 'Philippines', '—', '—', 'Program',
-            'Made a difference in the lives of 4 deserving college students by giving them the opportunity to continue their studies.',
-            'Scholarships', '4 college students', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2013achievements.html'), MISS_WEB],
-
-        ['SW-2013-005', '2013', 'Ricky Martin Foundation grant', 'Puerto Rico', '—', 'Ricky Martin Foundation', 'Organization',
-            'Funds received from SmallWorld in 2013; 10 children were enrolled into formal education and vocational training. The November 2014 partner report states the beneficiaries "perform in accordance to project’s goals".',
-            'Teaching', '10 children', '—', '—', 'Delivered (as reported)',
-            'Website regional impact entry citing the partner report', web('america.html'), MISS_WEB],
-
-        /* ── 2014 ─────────────────────────────────────────────────────────── */
-        ['SW-2014-001', '2014', 'Non-formal education for refugees', 'Lebanon', '—', '—', 'Program',
-            'Contributed to the education of Syrian and Palestinian refugees with little or no access to Lebanese public schools by delivering appropriate, effective and sustainable non-formal education.',
-            'Teaching', 'Refugee children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'), MISS_WEB],
-
-        ['SW-2014-002', '2014', 'Professional teacher support', 'Lebanon', '—', '—', 'Program',
-            'Provided a professional teacher to educate underprivileged children and help them enhance their knowledge and skills.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'), MISS_WEB],
-
-        ['SW-2014-003', '2014', 'Primary education for 10 children', 'Mexico', '—', 'DIF Torreon', 'Organization',
-            'Supported primary education for two executive years by covering tuition fees, transport, school supplies, lunch and uniforms.',
-            'Scholarships', '10 children', '—', 'Two years (start year not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html') + ' | ' + web('america.html'),
-            'Start year of the two-year support; amount and currency; agreement/receipt.'],
-
-        ['SW-2014-004', '2014', 'University sponsorship', 'Philippines', '—', '—', 'Program',
-            '4 underprivileged children were supported throughout their university education for 4 years.',
-            'Scholarships', '4 children', '—', '4 years (start year not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'),
-            'Start year of the four-year support; beneficiary organisation; amount and currency; agreement/receipt.'],
-
-        ['SW-2014-005', '2014', 'Primary education support', 'Spain', '—', '—', 'Program',
-            'Contributed to the primary education of 11 underprivileged children.',
-            'Scholarships', '11 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'), MISS_WEB],
-
-        ['SW-2014-006', '2014', 'Special education for children with disabilities', 'Brazil', '—', 'Vida Nova Association', 'Organization',
-            'Provided individualised care in physical, cognitive and psycho-social support; partner reports state the funds received in 2014 supported the special education of 15 children.',
-            'Other support', '15–16 children (the two source lines differ: 16 in care, 15 in special education)', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry; partner report not yet received by SmallWorld',
-            web('2014achievements.html') + ' | ' + web('america.html'),
-            'Which figure is correct (15 or 16); amount and currency; delivery date; the partner progress report (the source notes it had not been received).'],
-
-        ['SW-2014-007', '2014', 'Clinical therapy for children with special needs', 'Greece', '—', '—', 'Program',
-            'Provided clinical therapy for underprivileged children with special needs with the help of a network of specialists.',
-            'Other support', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'), MISS_WEB],
-
-        ['SW-2014-008', '2014', 'Child mistreatment expert', 'Spain', '—', '—', 'Program',
-            'Dedicated an expert on child mistreatment to exclusively assist children at risk from the education system.',
-            'Program (services)', 'Children at risk — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html'), MISS_WEB],
-
-        ['SW-2014-009', '2014', 'Basic education, training and nutrition', 'Bangladesh', 'Dhaka',
-            'Drop-In Center (DIC) for street and working children', 'Organization',
-            'Supported 40 children with basic education, training and workshops, nutrition and recreational activities. DIC provides daily meals, basic education and counselling, and children received vocational training in accessories fabrication.',
-            'Teaching', '40 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2014achievements.html') + ' | ' + web('visitsontheground.html'), MISS_WEB],
-
-        ['SW-2014-010', '2014', 'The Great Gatsby Gala Dinner', 'UAE', '—', '—', 'Program (fundraising event)',
-            'Fundraising gala dinner documented by the photo archive in the GALA folder: "2014 THE GREAT GATSBY GALA DINNER" (2,657 images) and "2014 Grand Event Pics" (2,903 images).',
-            'Other support (fundraising)', 'Not applicable — fundraising event', '— (amount raised not published)', '2014', 'Delivered — event documented',
-            'Photo archive only; no financial record, guest list or programme document',
-            GALA + '2014 THE GREAT GATSBY GALA DINNER\\ | ' + GALA + '2014 Grand Event Pics\\',
-            'Amount raised and the projects the proceeds funded; receipts or bank records; the gallery/venues and formal event programme.']
+        ['UK0125', '2025-2027', 'BIG EDUCATION - Rethinking project', 'UNITED KINGDOM', 'Two secondary and high schools in london', 'BIG EDUCATION', 'Educational Center', 'The head, heart, and Hands whole-child development through the Head, Heart, and Hand approach.', 'Education support / teacher traning', '1,000+ student', '10,000 pound', '21 November 2025 and ending on 20 November 2027.', 'Under procsseding', 'MOU / Payment receipts / video for visit', 'SmallWorld PC', '—', '2 years'],
+        ['UK0225', '2025', 'visit to the Uk project the board', 'UNITED KINGDOM', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—'],
+        ['UK0325', '2025-2026', 'Refugee Education UK (REUK)', 'UNITED KINGDOM', 'London, 101 King\'s Cross Road, London, WC1X 9LP', 'National Advice Line for Refugees', 'NGO', 'Establish a helpline as a national service provider.', 'National Advice Line for Refugees', '2000 student', '3,000 pound', '16/1/2025 - 16/01/2026', 'Completed', 'MOU / VISIT PICS / REPORT PROJECT', 'SmallWorld PC', '—', '1 year'],
+        ['AE0125', '2025-2026', 'Education for All', 'Abu Dhabi', 'Dubai Silicion Oasis', 'Pure Data Centers Global (Pure DC)', 'Limitted company', 'Building a computer lap', 'Education Support / goods in hand', '1,000+ student', '£22,500 pound', '13/05/2025-13/05/2026', 'Completed', 'MOU / VISIT PICS / REPORT PROJECT', 'SmallWorld PC', '—', '1 school year / Lap 5 years'],
+        ['UK0124', '2024-2025', 'Tayberry Project - 2024-2025', 'UNITED KINGDOM', 'UK , London ,West Yorkshire, Calderdale, East Lancashire, Rochdale, Bacup, and Burnley', 'Ask the queastion CIC', 'Educational Center - Tuition centre', 'Providing a safe space for student to study and tutoring for UK subrubs Children in need for safe space', 'Education support / Student Tutoring', '50 Student', '3,000 pound', '01/June /2024 - 01/June/2025', 'Completed', 'MOU / VISIT PICS / REPORT PROJECT', 'SmallWorld PC', '—', '1 year'],
+        ['UK0123', '2023', 'SMALLWORLD CHARITIE VISIT', 'UNITED KINGDOM', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—'],
+        ['UK0122', '2022-2023', 'CRY UK 2022- 2023', 'UNITED KINGDOM', 'Building Skills Center for children', 'NGO', 'Organization NGO', '—', 'Education Support', '—', '5000', '—', '—', 'MOU / VISIT PICS / REPORT PROJECT', 'SmallWorld PC', '—', '1 year'],
+        ['UK0222', '2022', 'Barnardo\'s Path Program - belive in children', 'UNITED KINGDOM', '—', 'NGO', 'Organization NGO', '—', '—', '—', '—', '—', 'Grant agreement in not signed', '—', 'SmallWorld PC', '—', '2 years'],
+        ['XX0121', '2021-2022', 'Back to School project', '—', '—', 'Zarat Al Lotus Autism Center', '—', '—', '—', '—', '45875', '—', '—', '—', '—', '—', '—'],
+        ['XX0221', '22nd Sept to 13th Jan 2021', 'Back To School Project', '—', '—', 'United Nations High Commissioner for Refugees (UNHCR)', '—', '—', '—', '—', '82742.88', '—', '—', '—', '—', '—', '—'],
+        ['XX0321', '24th Feb 2021', 'Virtual Learning Project (Laptop Project)', '—', '—', 'Emirates Autism Center', '—', '—', '—', '—', '4130.35', '—', '—', '—', '—', '—', '—'],
+        ['XX0421', '10th May 2021', 'Enhancing Autistic Capabilities Project', '—', '—', 'Emirates Autism Center', '—', '—', '—', '—', '1512', '—', '—', '—', '—', '—', '—'],
+        ['XX0521', '28th June 2021', 'Enhancing Autistic Capabilities Project', '—', '—', 'Basmat Amal Initiative', '—', '—', '—', '—', '3750', '—', '—', '—', '—', '—', '—'],
+        ['XX0621', '5th July 2021 to 13th July 2021', 'Capgemini Singapore PTE Ltd Collaboration', '—', '—', 'Basmat Amal Initiative', '—', '—', '—', '—', '11600', '—', '—', '—', '—', '—', '—'],
+        ['XX0721', '14th Sept 2021 to 5th Oct 2021', 'Skill Acquisition Programme', '—', '—', 'Basmat Amal Initiative', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—'],
+        ['XX0821', '16th Feb 2021', 'Library Programme', '—', '—', 'Unknown Yet', '—', '—', '—', '—', '5955', '—', '—', '—', '—', '—', '—'],
+        ['XX0120', '04 Feb 2020 to 15th Jan 2021', 'Regal London (Notepads Stored in the office)', '—', '—', '—', '—', '—', '—', '—', '35983.7', '—', '—', '—', '—', '—', '—'],
+        ['UK0111', '2011', 'Children In need (BBC)', 'UNITED KINGDOM', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—'],
     ];
 
-    /* ── Additional 2015–2026 rows, kept in the same 16-field order ──────── */
-    var PROJECTS_2 = [
-        /* ── 2015 ─────────────────────────────────────────────────────────── */
-        ['SW-2015-001', '2015', 'Non-formal education', 'India', '—', '—', 'Program',
-            'Contributed to the education of children who have little or no access to Indian public schools by delivering non-formal education.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+    var ALL_PROJECTS = PROJECTS;
 
-        ['SW-2015-002', '2015', 'Integral development in Bogotá', 'Colombia', 'Bogotá', '—', 'Program',
-            'Contributed to the integral development of children, youth and their families living in social and economic vulnerability.',
-            'Other support', 'Children, youth and families — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+    /* ═══ Column configuration ═════════════════════════════════════════════
+       Which workbook columns are shown, plus the columns the user added. Stored
+       in localStorage, so it survives a reload and applies in the browser
+       preview exactly as in the desktop app. */
+    var COL_KEY = 'swaProjectInventoryColumns';
+    var COLUMNS = { hidden: [], custom: [] };
 
-        ['SW-2015-003', '2015', 'Non-formal education for refugees', 'Lebanon', '—', '—', 'Program',
-            'Contributed to the education of Syrian and Palestinian refugees with little or no access to Lebanese public schools.',
-            'Teaching', 'Refugee children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+    function normColumnDef(def) {
+        if (!def || typeof def !== 'object') return null;
+        var field = String(def.field == null ? '' : def.field).trim();
+        if (!field) return null;
+        var type = def.type === 'select' ? 'select' : 'text';
+        var options = Array.isArray(def.options)
+            ? def.options.map(function (o) { return String(o).trim(); }).filter(Boolean)
+            : [];
+        return {
+            key: String(def.key || ''),
+            field: field.slice(0, 80),
+            what: String(def.what || 'A column added in this app — its values are typed here, not from the workbook.'),
+            type: type,
+            options: options.slice(0, 60),
+            locked: !!def.locked
+        };
+    }
 
-        ['SW-2015-004', '2015', 'Street children back to school', 'Mexico', '—', '—', 'Program',
-            'Provided the chance for street children to return to school and continue their education.',
-            'Teaching', 'Street children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html') + ' | ' + web('2021achievements.html'),
-            MISS_WEB + ' The same line also appears on the 2021 page — confirm whether this was one grant or two.'],
+    function loadColumns() {
+        try {
+            var raw = (typeof localStorage !== 'undefined') && localStorage.getItem(COL_KEY);
+            if (!raw) return { hidden: [], custom: [] };
+            var parsed = JSON.parse(raw);
+            var builtinKeys = BUILTIN_FIELDS.map(function (f) { return f.key; });
+            var custom = Array.isArray(parsed && parsed.custom)
+                ? parsed.custom.map(normColumnDef).filter(Boolean)
+                : [];
+            // A hidden column is kept only if it still exists — workbook columns
+            // and the app's own columns alike (a hidden tracker column used to be
+            // dropped on reload and reappear).
+            var known = builtinKeys.concat(custom.map(function (f) { return f.key; }));
+            var hidden = Array.isArray(parsed && parsed.hidden)
+                ? parsed.hidden.map(String).filter(function (k) { return known.indexOf(k) !== -1; })
+                : [];
+            return { hidden: hidden, custom: custom };
+        } catch (e) { return { hidden: [], custom: [] }; }
+    }
 
-        ['SW-2015-005', '2015', 'School fees and educational equipment', 'Nigeria', '—', '—', 'Program',
-            'Provided school fees, educational tools and equipment for female children who come from violent backgrounds.',
-            'Scholarships + school supplies', 'Female children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+    /** Returns '' on success, or the reason it could not be saved. */
+    function saveColumns(cfg) {
+        try {
+            if (typeof localStorage === 'undefined') return '';
+            localStorage.setItem(COL_KEY, JSON.stringify(cfg || { hidden: [], custom: [] }));
+            return '';
+        } catch (e) {
+            if (e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message || '')))) {
+                return 'App storage is full — remove a custom column or some attachments.';
+            }
+            return 'Could not save the column setup: ' + (e && e.message ? e.message : e);
+        }
+    }
 
-        ['SW-2015-006', '2015', 'Non-formal education', 'Philippines', '—', '—', 'Program',
-            'Contributed to the education of children with little or no access to Philippine public schools by delivering non-formal education.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+    COLUMNS = loadColumns();
 
-        ['SW-2015-007', '2015', 'Scholarships for migrant children', 'Thailand', '—',
-            'Center for the Protection of Children’s Rights Foundation (CPCR)', 'Organization',
-            'Supported migrant children with scholarships, educational tools, basic needs and preparation costs for children aged 15 and above pursuing non-formal education. CPCR also took care of 130 child abuse and neglect cases, using the grant mainly to guarantee security and healthcare.',
-            'Scholarships', 'Migrant children — count not stated; 130 abuse/neglect cases handled by CPCR', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only); grant was delivered through a fundraising event held in Abu Dhabi',
-            web('2015achievements.html') + ' | ' + web('visitsontheground.html'),
-            MISS_WEB + ' Which UAE fundraising event funded the grant, and the number of scholarship beneficiaries.'],
+    /* ═══ Two classification columns the tracker needs ══════════════════════
+       The workbook has one Institution type column, which mixes what the
+       beneficiary IS with what it received. These two fields split that:
 
-        ['SW-2015-008', '2015', 'Education for trafficking victims', 'UAE', '—', '—', 'Program',
-            'Contributed to the education of children who are victims of human trafficking and have little or no access to UAE public schools.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
+         • Beneficiary / Institution Type — the kind of entity that received
+           the support: a physical institution or facility, a programme, an
+           initiative, an individual, a group, or a community.
+         • Tangible / Non-Tangible — whether that entity (and the benefit) is
+           physical and directly measurable, or developmental and indirect.
 
-        ['SW-2015-009', '2015', 'Vocational training in design and handicrafts', 'Egypt', '—', '—', 'Program',
-            'Empowered 10 underprivileged children with skills in fashion design, accessories and jewellery design and handicrafts, in conjunction with training centres.',
-            'Teaching', '10 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
-
-        ['SW-2015-010', '2015', 'Music and sports talent development', 'Ukraine', '—', '—', 'Program',
-            'Supported 15 underprivileged children in developing their talents in music and sports.',
-            'Other support', '15 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html') + ' | ' + web('2021achievements.html'),
-            MISS_WEB + ' The same line also appears on the 2021 page — confirm whether this was one grant or two.'],
-
-        ['SW-2015-011', '2015', 'Therapeutic intervention for at-risk teenagers', 'Spain', '—', '—', 'Program',
-            'Supported 15 individuals (ages 12–16) with a common profile of poor, deficient or non-existent family structure through therapeutic intervention.',
-            'Other support', '15 young people (ages 12–16)', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2015achievements.html'), MISS_WEB],
-
-        /* ── 2016 ─────────────────────────────────────────────────────────── */
-        ['SW-2016-001', '2016', 'Library for orphans in Dire Dawa', 'Ethiopia', 'Dire Dawa (Eastern Ethiopia)', 'Luqman Primary School', 'School',
-            'Funded the building and equipping of a library for 500 orphans, with capacity to lend all elementary fundamental books to 300 children, reducing drop-outs in a poor area hit by clashes between the Somali and Oromia regions.',
-            'Other support (construction) + school supplies', '500 orphans; lending capacity for 300 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only) and project page text',
-            web('2016achievements.html') + ' | ' + web('20172018achievements.html') + ' | ' + web('projects.html'),
-            MISS_WEB + ' Reported on both the 2016 and the 2017–2018 pages — confirm whether this was one grant or two.'],
-
-        ['SW-2016-002', '2016', 'Ten computers for IT lessons', 'Lebanon', '—', '—', 'Program',
-            'Provided 10 computers to properly equip a dedicated classroom / computer lab for IT lessons for Syrian refugees.',
-            'Computers', 'Refugee children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2016achievements.html'), MISS_WEB],
-
-        ['SW-2016-003', '2016', 'Arabic and Art teacher', 'Lebanon', '—', '—', 'Program',
-            'Provided a professional teacher to educate children and enhance their knowledge and skills in Arabic and Art.',
-            'Teaching', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2016achievements.html'), MISS_WEB],
-
-        ['SW-2016-004', '2016', 'Child mistreatment expert for at-risk children', 'Spain', '—', '—', 'Program',
-            'Assisted 15 at-risk children (ages 8–17), their families and professionals working in child protection by dedicating an expert on child mistreatment.',
-            'Program (services)', '15 children (ages 8–17)', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2016achievements.html'), MISS_WEB],
-
-        ['SW-2016-005', '2016', 'Walkathon 2016', 'UAE', 'Abu Dhabi', '—', 'Program (awareness campaign)',
-            'Second walkathon with workshops where children created an art piece and sent a letter of hope to an anonymous child elsewhere, signing "Today I walked for you".',
-            'Other support (awareness)', 'Not applicable — awareness campaign', '—', '2016', 'Delivered (as reported)',
-            'Website campaigns entry (text only)', web('campaigns.html'), MISS_WEB],
-
-        /* ── 2017–2018 ────────────────────────────────────────────────────── */
-        ['SW-2017-001', '2017–2018', 'Computer laboratory in Fas', 'Morocco', 'Fas (Fez)', 'Sajlamasa school', 'School',
-            'Established a fully equipped computer laboratory for underprivileged children, in collaboration with the UAE Red Crescent; the Ambassador of the United Arab Emirates in Morocco presented the donation to the school on SmallWorld’s behalf.',
-            'Computers', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry and project page text (text only)',
-            web('20172018achievements.html') + ' | ' + web('projects.html') + ' | ' + web('visitsontheground.html'),
-            MISS_WEB + ' Exact delivery date and the hand-over record from the UAE Embassy.'],
-
-        ['SW-2017-002', '2017–2018', 'Socotra nursery', 'Yemen', 'Socotra', '— (partner: UAE Red Crescent)', 'School (nursery)',
-            'Built a fully equipped nursery next to a school for hundreds of children, giving them access to basic education and a preparatory curriculum before joining school.',
-            'Other support (construction)', 'Hundreds of children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry and project page text (text only)',
-            web('20172018achievements.html') + ' | ' + web('projects.html') + ' | ' + web('middleeast.html'), MISS_WEB],
-
-        /* ── 2019 ─────────────────────────────────────────────────────────── */
-        ['SW-2019-001', '2019', 'Computer laboratory for 540 students', 'Lebanon', 'Bekaa', '—', 'School',
-            'A fully equipped computer laboratory was provided for 540 students.',
-            'Computers', '540 students', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry and project page text (text only)',
-            web('achievements2019.html') + ' | ' + web('projects.html'), MISS_WEB],
-
-        ['SW-2019-002', '2019', 'IT laboratory for orphaned children', 'Lebanon', '—', 'Home orphanages', 'Orphanage',
-            'An IT laboratory for abandoned and orphaned children.',
-            'Computers', 'Orphaned children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry and project page text (text only)',
-            web('achievements2019.html') + ' | ' + web('projects.html'), MISS_WEB],
-
-        ['SW-2019-003', '2019', 'Barber Center vocational training', 'Lebanon', '—', '—', 'Program',
-            'A barber centre for boys to facilitate a vocational training programme teaching barber services.',
-            'Teaching', 'Boys — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry and project page text (text only)',
-            web('achievements2019.html') + ' | ' + web('projects.html'), MISS_WEB],
-
-        ['SW-2019-004', '2019', 'Computer laboratory for drop-outs', 'Lebanon', 'Tripoli', '—', 'Program',
-            'A computer laboratory was installed and fully equipped for underprivileged children who have no access to computers or proper education; many are drop-outs with a history of abuse.',
-            'Computers', 'Children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website project page text (text only)', web('projects.html'), MISS_WEB],
-
-        /* ── 2019–2020 ────────────────────────────────────────────────────── */
-        ['SW-2020-001', '2019–2020', 'Fifteen computers for home orphanages', 'Lebanon', '—', 'Home orphanages', 'Orphanage',
-            'Supported computer laboratory projects by donating 15 computers for home orphanages, giving children computer skills and access to educational programmes.',
-            'Computers', 'Underprivileged children — count not stated; 15 computers donated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('20192020achievements.html'), MISS_WEB],
-
-        ['SW-2020-002', '2019–2020', 'Educative material for autistic children', 'UAE', '—', '—', 'Program',
-            'Supported autistic children in need of educative material to continue their educational journeys.',
-            'School supplies', 'Autistic children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('20192020achievements.html'), MISS_WEB],
-
-        ['SW-2020-003', '2019–2020', 'Intensive academic catch-up programme', 'UAE', '—', '—', 'Program',
-            'Provided 25 underprivileged children with an intensive programme in English, Maths, Arabic and Science so they could sit the ADEC governmental exam and re-enrol in schools after two years out of school.',
-            'Teaching', '25 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('20192020achievements.html'), MISS_WEB],
-
-        ['SW-2020-004', '2019–2020', '256 laptops with UNHCR', 'UAE', 'Sharjah and Ajman', 'UNHCR (partnership)', 'Organization',
-            'Provided disadvantaged Syrian children with 256 laptops as part of the "Virtual Learning Developmental Support Program".',
-            'Computers', '256 children — 256 laptops', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('20192020achievements.html'),
-            MISS_WEB + ' Partnership agreement/MoU with UNHCR and the delivery record.'],
-
-        /* ── 2021 ─────────────────────────────────────────────────────────── */
-        ['SW-2021-001', '2021', '81 laptops for remote education', 'UAE', 'Ras Al Khaimah, Sharjah and Ajman', '—', 'Program',
-            'Donated 81 laptops as an in-kind contribution to enable 81 vulnerable Syrian children to continue their remote education during COVID-19 measures.',
-            'Computers', '81 children — 81 laptops', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'),
-            MISS_WEB + ' In-kind donation record or delivery note per emirate.'],
-
-        ['SW-2021-002', '2021', 'School supplies for autistic students', 'UAE', 'Abu Dhabi', 'Emirates Autism Center', 'Organization',
-            'In-kind donation of school supplies, stationery and keyboards to enable autistic students with their distance learning.',
-            'School supplies', 'Autistic students — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'), MISS_WEB],
-
-        ['SW-2021-003', '2021', 'Five laptops for distance learning', 'UAE', '—', 'Basmat Amal Initiative', 'Organization',
-            'Donated 5 laptops to support children with low economic resources to continue their distance learning.',
-            'Computers', '5 laptops', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'), MISS_WEB],
-
-        ['SW-2021-004', '2021', 'Educational tools for autistic children', 'UAE', '—', 'Orange Seeds Nursery', 'Organization',
-            'Supported Orange Seeds Nursery with an in-kind donation of educational tools for autistic children with low economic resources.',
-            'School supplies', 'Autistic children — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'), MISS_WEB],
-
-        ['SW-2021-005', '2021', 'Filmmaking training', 'UAE', '—', 'Basmat Amal Initiative', 'Organization',
-            'Sponsored 7 children in learning all aspects of filmmaking, from storyboarding to filming to editing.',
-            'Teaching', '7 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'), MISS_WEB],
-
-        ['SW-2021-006', '2021', 'Library books and materials', 'UAE', 'Abu Dhabi', 'Basmat Amal Initiative', 'Organization',
-            'In-kind donation of Arabic and English dictionaries, printable activity books, story books, magazines and activity books for the library at the Basmat Amal premises.',
-            'School supplies', 'Students of Basmat Amal Initiative — count not stated', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2021achievements.html'), MISS_WEB],
-
-        /* ── 2022 ─────────────────────────────────────────────────────────── */
-        ['SW-2022-001', '2022', 'Drop-out prevention workshops', 'India', '—', '—', 'Program',
-            'Supported 120 disadvantaged children at risk of dropping out of school with child-friendly teaching techniques and workshops.',
-            'Teaching', '120 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2022achievements.html'), MISS_WEB],
-
-        ['SW-2022-002', '2022', 'School supplies for 400 children', 'Malawi', '—', '—', 'Program',
-            'Supported 400 vulnerable children with school supplies to continue their education.',
-            'School supplies', '400 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2022achievements.html'), MISS_WEB],
-
-        ['SW-2022-003', '2022', 'Laptops for Syrian families', 'UAE', '—', '—', 'Program',
-            'Supported 5 Syrian underprivileged families with laptops to help their children with online education.',
-            'Computers', '5 families', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2022achievements.html'), MISS_WEB],
-
-        ['SW-2022-004', '2022', 'Earthquake emergency response', 'Syria and Turkey', '—', '—', 'Program',
-            'Supported 50 families who lost everything in the earthquake with warm blankets, clothes, kitchen supplies and materials to build shelters.',
-            'Other support (emergency)', '50 families', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2022achievements.html'),
-            MISS_WEB + ' Beneficiary count is expressed in families, not children.'],
-
-        ['SW-2022-005', '2022', 'Social and emotional learning', 'United Kingdom', '—', '—', 'Program',
-            'Supported 100 disadvantaged children from reception to year 6 who have learning difficulties with social and emotional learning.',
-            'Teaching', '100 children (reception to year 6)', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2022achievements.html'), MISS_WEB],
-
-        /* ── 2023 ─────────────────────────────────────────────────────────── */
-        ['SW-2023-001', '2023', 'Education and psychosocial support in temporary learning spaces', 'Middle East (multiple countries)', '—', '—', 'Program',
-            'Ran education activities in 16 temporary learning spaces with an estimated 5,800 children taking part in non-formal education and psychosocial support, and resumed activities in 20 schools while working with other international organisations to make schools safe.',
-            'Teaching', 'Estimated 5,800 children', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'),
-            'Country-level split, partner organisations, amount and currency and delivery dates.'],
-
-        ['SW-2023-002', '2023', 'Education kits for children in camps', 'Turkey', 'Gaziantep (two temporary camps)', '—', 'Program',
-            'Supplied more than 500 education kits for children in two temporary camps, plus 16 teacher kits and 17 sets of rain boots for teachers and school staff, and transported 14 teachers into villages.',
-            'School supplies', 'More than 500 children; 14 teachers supported', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'),
-            MISS_WEB + ' Which organisation distributed the kits and when.'],
-
-        ['SW-2023-003', '2023', 'Tents and shelter support', 'Syria', '22 temporary camps', '—', 'Program',
-            'Provided 116 new tents to families; partners on site continued distributing hot meals, supporting 28,794 people, and providing heaters, fuel and food parcels.',
-            'Other support (shelter)', '116 families; 28,794 people reached overall', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'),
-            MISS_WEB + ' Beneficiary figures cover whole families/populations, not children only.'],
-
-        ['SW-2023-004', '2023', 'Essential items after heavy rains', 'Turkey', 'Adıyaman, Gaziantep, Kahramanmaraş and Hatay', '—', 'Program',
-            'Delivered essential items such as tarpaulin, ropes, blankets and raincoats; expert teams advised the national Repair Task Force and supported assessments in Nurdağı.',
-            'Other support (NFI)', 'Not quantified in the source', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        ['SW-2023-005', '2023', 'Water, sanitation and hygiene', 'Syria', '22 temporary camps', '—', 'Program',
-            'Provided daily water trucking and waste management for 36,346 people across 22 temporary camps.',
-            'Other support (WASH)', '36,346 people', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        ['SW-2023-006', '2023', 'Hygiene and dignity kits', 'Turkey', '—', '—', 'Program',
-            'Distributed 977 hygiene kits (shampoo, toothbrushes, toilet roll) and 2,516 dignity kits (sanitary products), supporting 6,120 people.',
-            'Other support', '6,120 people', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        ['SW-2023-007', '2023', 'Primary healthcare and nutrition screening', 'Syria', '—', '—', 'Program',
-            'Provided access to more than 952 children, with 1,473 adults accessing primary healthcare through mobile clinics, and screened children under five for malnutrition treatment.',
-            'Other support (health)', '952 children; 1,473 adults', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        ['SW-2023-008', '2023', 'Ramadan dry food distribution', 'Turkey', 'Hatay, Gaziantep, Kahramanmaraş and Adıyaman', '—', 'Program',
-            'Delivered dry food including rice, dates and flour to around 10,000 families during the month of Ramadan.',
-            'Other support (food)', 'Around 10,000 families', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        ['SW-2023-009', '2023', 'Cash assistance for homeless families', 'Syria', '—', '—', 'Program',
-            'Provided cash transfers to more than 1,900 families who had been left homeless.',
-            'Other support (cash)', 'More than 1,900 families', '—', '—', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2023achievements.html'), MISS_WEB],
-
-        /* ── 2024 ─────────────────────────────────────────────────────────── */
-        ['SW-2024-001', '2024', 'Safe study spaces in Calderdale', 'United Kingdom', 'Calderdale', '—', 'Program',
-            'Support for disadvantaged children aged 11–18: safe study spaces, tutoring sessions and an office as a safe space to study independently, aimed at young people affected by abuse, neglect or trauma. Term of one year; up to 4 hours over approximately 200 sessions.',
-            'Teaching', 'Children aged 11–18 — count not stated; ~200 sessions of up to 4 hours', '—', 'Term of one year (start date not stated)', 'Delivered (as reported)',
-            'Website achievements entry (text only)', web('2024achievements.html'),
-            MISS_WEB + ' Number of children, start and end dates and the grant agreement.'],
-
-        /* ── 2025 ─────────────────────────────────────────────────────────── */
-        ['SW-2025-001', '2025', 'Youth leadership programme for young refugees', 'United Kingdom', '—', '—', 'Program',
-            'An 8-week youth leadership programme starting after Christmas, focused on developing knowledge and skills for entry-level job opportunities, to empower young refugees without access to university-level education.',
-            'Teaching', 'Young refugees — count not stated', '—', 'Programme starts after Christmas', 'In progress (as reported)',
-            'Website achievements entry (text only)', web('2025achievements.html'),
-            MISS_WEB + ' Exact start date, delivery partner and participant numbers.'],
-
-        ['SW-2025-002', '2025', 'National refugee education helpline', 'United Kingdom', '—', '—', 'Program',
-            'A dedicated support line giving refugees, asylum seekers and caregivers advice and resources on the UK education system. Key deliverables: direct support to 2,000 refugees with education-related queries, an impact report (beneficiary data, education levels, testimonies, case outcomes) and a financial accountability report.',
-            'Program (services)', 'Direct support to 2,000 refugees; reported in queries rather than children', '—', 'Not stated', 'In progress (as reported)',
-            'Website achievements entry (text only); the impact and financial accountability reports are described as deliverables, not yet in the folder',
-            web('2025achievements.html'),
-            'Delivery partner; the impact report and the financial accountability report; the grant agreement and amount.'],
-
-        /* ── 2026 — local documents ───────────────────────────────────────── */
-        ['SW-2026-001', '2026', 'Rethinking School — Empowering Education for a Changing World', 'United Kingdom', '—',
-            'Big Education (Registration No. 07648389)', 'Organization',
-            'Two-year partnership supporting the Rethinking School Project, helping UK state schools move beyond exam-focused learning through the Head, Heart and Hand framework. Pilot in two UK schools — one primary, one secondary — delivering teacher training and leadership development, student workshops on wellbeing, creativity and teamwork, learning toolkits, mentoring and ongoing support, and collaborative exchanges. A Partnership Engagement Addendum sets out four structured engagement visits over two years (board, volunteer, community and children’s impact visit) and SmallWorld representation at public events such as the Next Generation Schools Conference (March 2026).',
-            'Teaching', '1,000+ students and their educators (two schools)',
-            '£10,000 (funding request stated in the proposal; no confirmation of receipt in the folder)',
-            'Not yet delivered — two-year term; conference mentioned for March 2026', 'Planned / in progress',
-            'Project proposal PDF (funding request) and the Partnership Engagement Addendum DOCX; both contain no financial schedule, invoice or receipt',
-            SWDOCS + 'SWF Proposal The Rethinking School Project.pdf | ' + SWDOCS + 'SmallWorld and Big Education_ Benhind the partnership Agreement .docx',
-            'Confirmation that the £10,000 was granted and received (signed agreement, invoice or receipt); the names of the two schools; the partnership start and end dates; the number of pupils in each school; a delivery/impact report.'],
-
-        /* ── Gala and event archive (GALA folder) ─────────────────────────── */
-        ['SW-GALA-001', '2014', 'Madame Salam 2014 event', 'UAE', '—', '—', 'Program (fundraising event)',
-            'Event documented by the "MADAM SALAM 2014" photo archive (Day 1 and Day 2 sub-folders) in the GALA folder, an event held in honour of founder and president Mrs Salam Hamzeh Ghaith.',
-            'Other support (fundraising)', 'Not applicable — fundraising event', '— (amount raised not published)', '2014', 'Delivered — event documented',
-            'Photo archive only (two day-folders); no financial or programme document', GALA + 'MADAM SALAM 2014\\',
-            'Amount raised and which projects it funded; venue, date and guest list; consent/permissions for using the photographs.'],
-
-        ['SW-GALA-002', '2011–2016', 'SmallWorld celebrity and gala photo archive', 'UAE', '—', '—', 'Program (fundraising event)',
-            'The GALA folder holds 6,373 photo files dated 2011–2016 covering the celebrity nights (folder "SMALLWORLD CELEBRITY", "SALAM WITH CELEBRITIES" — including Billy Zane and other guests) and the grand event photographs that accompanied the fundraising galas.',
-            'Other support (fundraising)', 'Not applicable — archive of fundraising events', '— (amounts raised not published)', 'Files dated 2011–2016', 'Delivered — events documented, archive not yet indexed',
-            'Photographs only; one celebrity bio document (Ricky Martin, DOCX + PDF) and two logo PDFs. No agreements, receipts or reports.',
-            GALA + 'SMALLWORLD CELEBRITY\\ | ' + GALA + 'SALAM WITH CELEBRITIES\\ | ' + GALA + 'Celebrities\\',
-            'Which photographs belong to which event and year (only file dates are available); amounts raised per gala; which country projects each gala funded.'],
-
-        ['SW-GALA-003', '2011', 'Early gala and celebrity photographs', 'UAE', '—', '—', 'Program (fundraising event)',
-            'Photographs at the root of the GALA folder dated 31 March 2011 (series DSC_01xx and AJI_3663, 2011), the earliest images in the archive, alongside later series dated 2012–2016.',
-            'Other support (fundraising)', 'Not applicable — event photographs', '— (amount raised not published)', 'Files dated 2011', 'Delivered — events documented, archive not yet indexed',
-            'Photographs only; no event record', GALA + '(root folder)',
-            'Which event each early photo series documents; the linked funding need; missing year folders between 2016 and the present.']
+       They are app columns (values recorded here, not in the workbook), shown
+       by default and <b>locked</b>: they can be hidden but not deleted, so the
+       classification cannot silently disappear from the tracker. Left blank
+       until someone classifies the row — no value is inferred. */
+    var TRACKER_COLUMNS = [
+        {
+            key: 'beneficiary_kind',
+            field: 'Beneficiary / Institution Type',
+            what: 'The kind of entity that received the support — a physical institution or facility, a programme, an initiative, an individual, a group, or a community. Separate from Tangible / Non-Tangible, which says whether it is physical.',
+            type: 'select',
+            options: ['Physical institution', 'Programme', 'Initiative', 'Individual', 'Group', 'Community'],
+            locked: true
+        },
+        {
+            key: 'tangibility',
+            field: 'Tangible / Non-Tangible',
+            what: 'Tangible: a physical entity or identifiable, measurable support. Non-tangible: a programme, network or developmental benefit that is not defined by a physical facility or a directly measurable item.',
+            type: 'select',
+            options: ['Tangible', 'Non-Tangible'],
+            locked: true
+        }
     ];
 
-    var ALL_PROJECTS = PROJECTS.concat(PROJECTS_2);
+    function ensureTrackerColumns() {
+        var added = false;
+        TRACKER_COLUMNS.forEach(function (def) {
+            var exists = BUILTIN_FIELDS.concat(COLUMNS.custom).some(function (f) { return f.key === def.key; });
+            if (exists) return;
+            COLUMNS.custom.push(normColumnDef(def));
+            added = true;
+        });
+        if (!added) return;
+        refreshFields();
+        saveColumns(COLUMNS);
+    }
+
+    ensureTrackerColumns();
+
+    function refreshFields() {
+        FIELDS.length = 0;
+        BUILTIN_FIELDS.forEach(function (f) {
+            if (COLUMNS.hidden.indexOf(f.key) === -1) FIELDS.push(f);
+        });
+        COLUMNS.custom.forEach(function (f) {
+            if (COLUMNS.hidden.indexOf(f.key) === -1) FIELDS.push(f);
+        });
+        // A column that is no longer shown cannot stay the edit target.
+        if (typeof state !== 'undefined' && state && state.editColumn &&
+            !FIELDS.some(function (f) { return f.key === state.editColumn; })) {
+            state.editColumn = null;
+            state.editDraft = {};
+        }
+    }
+
+    function customKey(label) {
+        var slug = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24);
+        var base = 'c_' + (slug || 'column');
+        var key = base, n = 2;
+        while (BUILTIN_FIELDS.concat(COLUMNS.custom).some(function (f) { return f.key === key; })) {
+            key = base + '_' + n;
+            n++;
+        }
+        return key;
+    }
+
+    /** Add a column. Returns '' on success, or the reason it was refused. */
+    function addColumn(def) {
+        var clean = normColumnDef(def);
+        if (!clean) return 'Give the new column a name first.';
+        if (clean.type === 'select' && !clean.options.length) return 'A dropdown column needs at least one option.';
+        var clash = BUILTIN_FIELDS.concat(COLUMNS.custom).filter(function (f) {
+            return String(f.field).toLowerCase() === clean.field.toLowerCase();
+        })[0];
+        if (clash) return 'A column called “' + clean.field + '” already exists.';
+        clean.key = customKey(clean.field);
+        COLUMNS.custom.push(clean);
+        refreshFields();
+        return saveColumns(COLUMNS);
+    }
+
+    /** Show or hide any column (workbook or custom). Workbook data is kept. */
+    function setColumnVisible(key, visible) {
+        var known = BUILTIN_FIELDS.concat(COLUMNS.custom).some(function (f) { return f.key === key; });
+        if (!known) return 'That column does not exist.';
+        var at = COLUMNS.hidden.indexOf(key);
+        if (visible && at !== -1) COLUMNS.hidden.splice(at, 1);
+        else if (!visible && at === -1) COLUMNS.hidden.push(key);
+        refreshFields();
+        return saveColumns(COLUMNS);
+    }
+
+    /** Delete a column added in this app, together with the values typed into it. */
+    function deleteColumn(key) {
+        var found = COLUMNS.custom.filter(function (f) { return f.key === key; })[0];
+        if (!found) return 'Only columns added in this app can be deleted — workbook columns are hidden, not removed.';
+        if (found.locked) return '“' + found.field + '” is part of the tracker — hide it instead of deleting it.';
+        COLUMNS.custom = COLUMNS.custom.filter(function (f) { return f.key !== key; });
+        COLUMNS.hidden = COLUMNS.hidden.filter(function (k) { return k !== key; });
+        var edits = loadEdits();
+        Object.keys(edits).forEach(function (id) {
+            var bucket = edits[id];
+            if (!bucket || typeof bucket !== 'object') return;
+            delete bucket[key];
+            if (!Object.keys(bucket).length) delete edits[id];
+        });
+        saveEdits(edits);
+        var users = loadUserProjects();
+        users.forEach(function (u) { if (u && u.values) delete u.values[key]; });
+        saveUserProjects(users);
+        if (state.cellEdit && state.cellEdit.key === key) state.cellEdit = null;
+        refreshFields();
+        return saveColumns(COLUMNS);
+    }
+
+    function showAllColumns() {
+        COLUMNS.hidden = [];
+        refreshFields();
+        return saveColumns(COLUMNS);
+    }
+
+    refreshFields();
+
 
     /* ── Sources panel content ────────────────────────────────────────────
-       States plainly what was reachable and what was not, so the inventory can
-       never be mistaken for a complete record. */
+       States plainly what the tab is built from and what the workbook could
+       not tell us, so the inventory can never be mistaken for a verified
+       record. */
     var SOURCES = [
         {
-            name: 'Instagram — @smallworld_foundation (SmallWorld Foundation)',
-            what: 'Profile data read from the public profile page: 3,429 followers, 6 following, 676 posts. Bio: "NGO that educates thousands of #children all around the globe ; Based in #UK , Founder & President @salamzhg". Used for organisation identity and scale only.',
-            url: IG,
-            gap: 'Post captions were NOT readable: the profile’s post data is only served to a signed-in session, and the anonymous reader returned no post objects (the local scan file smallworld_full_scan.json likewise holds 12 posts with empty captions). No caption text is used anywhere in this inventory. To capture captions, sign in to Instagram in the browser the scan uses (or install the OpenCLI browser extension) and re-run the profile scan.'
+            name: 'Workbook — SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx (sheet “Project Inventory”)',
+            what: 'The only source of the rows: 18 project records entered by the team, covering 2025–2011. Descriptions, amounts, statuses, documentation, file locations and durations are reproduced as recorded in that sheet.',
+            url: 'SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx — sheet “Project Inventory”, rows 5–21 and 31',
+            gap: 'The Project ID column is blank on every row, so the app assigns a client ID from the row itself (country code, the next number for that country in the year, then the 2-digit year). Many cells are empty (country, location, beneficiary organisation, delivery date, amount, missing information) and the sheet is a working record, not evidence: nothing here has been checked against an agreement, receipt or report.'
         },
         {
-            name: 'Website — smallworldfoundation.com',
-            what: 'Home page (global impact), Events, Projects, Campaigns, Visits on the Ground, Our Reach (Asia / Africa / America / Europe / Middle East / Oceania) and the Achievements pages for 2011, 2012, 2013, 2014, 2015, 2016, 2017–2018, 2019, 2019–2020, 2021, 2022, 2023, 2024 and 2025.',
-            url: SITE,
-            gap: 'These pages are narrative summaries: they almost never state an amount, a currency or a delivery date. Several page sections are repeated verbatim between years (for example the health/medical block on 2011 reappears on 2015, and the Syria/Turkey block on 2023 reappears on 2024), so repeats are flagged instead of being counted twice.'
+            name: 'Workbook — sheet “Field Guide”',
+            what: 'The agreed field list and what to record in each field. The 17th column, “Duration of project”, comes from the Project Inventory header because the Field Guide sheet does not list it.',
+            url: 'SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx — sheet “Field Guide”',
+            gap: 'The guide describes the intended record; it supplies no data of its own.'
         },
         {
-            name: 'Local photo archive — CAMERA PROJECTS\\GALA',
-            what: '6,373 files (2011–2016): "2014 THE GREAT GATSBY GALA DINNER" (2,657 images), "2014 Grand Event Pics" (2,903), "MADAM SALAM 2014" (Day 1 + Day 2), "SMALLWORLD CELEBRITY", "SALAM WITH CELEBRITIES", "Celebrities\\Ricky Martin" plus early 2011 series at the folder root.',
-            url: GALA,
-            gap: 'Photographs and file dates only — no financial records, receipts or guest lists. One celebrity bio document and two logo PDFs were also found. No image is linked to a specific project, so gala rows say so.'
-        },
-        {
-            name: 'Local documents — CAMERA PROJECTS\\Smallworld',
-            what: 'SWF Proposal The Rethinking School Project.pdf (funding request: £10,000) and "SmallWorld and Big Education_ Behind the partnership Agreement .docx" (Partnership Engagement Addendum). Country images (Armenia, Bangladesh, Egypt, Greece, India, Japan, Mexico, Nigeria, Turkey, USA) and volunteering images that match the website’s country programmes.',
-            url: SWDOCS,
-            gap: 'The only source in this inventory that states an amount. No invoice, receipt, signed grant agreement or bank record is present, so the £10,000 is recorded as requested, not as paid.'
+            name: 'Workbook — sheets “Work Progress” and “Read Me”',
+            what: 'The team task list (T-01 to T-09) and the working rules: enter projects from 2026 backwards, record only facts supported by documents or sources, and flag unclear details in “Missing information”.',
+            url: 'SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx — sheets “Work Progress” and “Read Me”',
+            gap: 'Neither sheet is imported into the inventory and neither states a project fact.'
         }
     ];
 
     var METHOD_NOTES = [
-        'One row = one documented support activity. Where the same activity is reported on two pages (for example the Ethiopia library on the 2016 and 2017–2018 pages) it is kept as one row and the repeat is flagged in Missing information rather than counted twice.',
-        '“—” means the sources do not document that field. Nothing here is estimated or inferred from a similar project.',
-        'Amounts and currencies are almost never published. The only figure the sources state is the £10,000 funding request for the Rethinking School project; every other row reads “—”.',
-        'Delivery dates are recorded only when a source gives one; many rows therefore show “—” even though the year is known.',
-        'Beneficiary counts are copied as published, including the ones expressed in people or families rather than children — those rows say so.'
+        'Every row is copied from the “Project Inventory” sheet of SmallWorld_Project_Inventory_and_Progress_Tracker.xlsx. The earlier website-, Instagram- and photo-archive-derived rows were deleted so this tab matches the workbook.',
+        'The workbook’s Project ID column is blank, so each row is given the requested client ID: country code (UK, AE; XX where the Country cell is empty), a 2-digit number for its place in that country for the year (01, 02, 03, 04…), then the last two digits of the year — UK0125 is the first UK project of 2025, UK0225 the second. The number restarts for each country and year and never reuses one, so two rows cannot share an ID.',
+        'Abu Dhabi is coded AE (United Arab Emirates) and the United Kingdom is coded GB. XX is used where the workbook records no country at all; it means “not recorded”, not a made-up country.',
+        'Values are reproduced as recorded — including the workbook’s own wording (“Under procsseding”, “Completed”, “Grant agreement in not signed”) and its blank cells, which show here as “—”. Only leading, trailing and repeated whitespace is trimmed.',
+        'Two lines in the sheet are not projects and are not imported: the expense-summary row (“SmallWorld Foundation Expenses (FEB 2020 - JAN 2021) spreadsheet enclosed”) and a stray row that holds only “No MOU / GRANT”.',
+        'The workbook leaves “Missing information” blank on every row. The app does not fill it in with invented notes; the double-check section reports the gaps each row actually shows.',
+        'The donation column is free text (“3,000 pound”, “5000”, “£22,500 pound”), so no money total is computed — adding those would imply a currency precision the workbook does not state.',
+        'A correction typed into the table is stored as a local override, keyed by the row’s original workbook Project ID and marked “edited”; the workbook value stays visible, the exports use the corrected value, and “Reset my edits” restores every source value. The workbook itself is never rewritten.'
     ];
 
     /* ═══ XLSX builder ════════════════════════════════════════════════════
@@ -845,32 +489,10 @@
         ]);
     }
     /* ═══ Identity images ═════════════════════════════════════════════════
-       Each row gets a visual identifier. A REAL photograph is used only when
-       the sources contain one for that country or event; otherwise a generated
-       tile (flag + project id) is drawn. Nothing is passed off as a photo of a
-       project that has no photograph in the sources. */
-    var SW_MEDIA = SWDOCS;
-    var GALA_MEDIA = GALA;
-
-    var COUNTRY_IMAGE = {
-        'Armenia': 'armenia.jpg',
-        'Bangladesh': 'bangladesh1.jpg',
-        'Egypt': 'egypt.jpg',
-        'Greece': 'greece.jpg',
-        'India': 'india.jpg',
-        'Japan': 'japan.jpg',
-        'Mexico': 'mexico.jpg',
-        'Nigeria': 'nigeria.jpg',
-        'Turkey': 'turkey.jpg',
-        'USA': 'usa.jpg'
-    };
-
-    var GALA_IMAGE = {
-        'SW-GALA-001': GALA_MEDIA + 'MADAM SALAM 2014\\MADAM SALAM (Day 1)\\',
-        'SW-GALA-002': GALA_MEDIA + 'SMALLWORLD CELEBRITY\\',
-        'SW-GALA-003': GALA_MEDIA + 'SMALLWORLD CELEBRITY\\',
-        'SW-2014-010': GALA_MEDIA + '2014 THE GREAT GATSBY GALA DINNER\\'
-    };
+       Each row gets a visual identifier. A real picture is used only when the
+       row carries one (a project you added yourself); otherwise a generated
+       tile (flag + project id) is drawn. Nothing is passed off as a photograph
+       of a project the workbook has no photograph for. */
 
     var COUNTRY_FLAG = {
         'Australia': '\u{1F1E6}\u{1F1FA}', 'Bosnia': '\u{1F1E7}\u{1F1E6}', 'Bangladesh': '\u{1F1E7}\u{1F1E9}',
@@ -884,10 +506,60 @@
         'Brazil': '\u{1F1E7}\u{1F1F7}', 'Spain': '\u{1F1EA}\u{1F1F8}', 'Greece': '\u{1F1EC}\u{1F1F7}',
         'Thailand': '\u{1F1F9}\u{1F1ED}', 'Nigeria': '\u{1F1F3}\u{1F1EC}', 'Ethiopia': '\u{1F1EA}\u{1F1F9}',
         'Morocco': '\u{1F1F2}\u{1F1E6}', 'Yemen': '\u{1F1FE}\u{1F1EA}', 'Malawi': '\u{1F1F2}\u{1F1FC}',
-        'Syria': '\u{1F1F8}\u{1F1FE}', 'United Kingdom': '\u{1F1EC}\u{1F1E7}', 'Venezuela': '\u{1F1FB}\u{1F1EA}',
+        'Syria': '\u{1F1F8}\u{1F1FE}', 'United Kingdom': '\u{1F1EC}\u{1F1E7}', 'UNITED KINGDOM': '\u{1F1EC}\u{1F1E7}',
+        'UK': '\u{1F1EC}\u{1F1E7}', 'Venezuela': '\u{1F1FB}\u{1F1EA}',
         'Malaysia': '\u{1F1F2}\u{1F1FE}', 'Russia': '\u{1F1F7}\u{1F1FA}', 'Tunisia': '\u{1F1F9}\u{1F1F3}',
-        'Sudan': '\u{1F1F8}\u{1F1E9}', 'Korea': '\u{1F1F0}\u{1F1F7}'
+        'Sudan': '\u{1F1F8}\u{1F1E9}', 'Korea': '\u{1F1F0}\u{1F1F7}',
+        'United States': '\u{1F1FA}\u{1F1F8}', 'United States of America': '\u{1F1FA}\u{1F1F8}',
+        'United Arab Emirates': '\u{1F1E6}\u{1F1EA}', 'Abu Dhabi': '\u{1F1E6}\u{1F1EA}'
     };
+
+    /* ── The countries the programme works in ─────────────────────────────
+       The map from the programme brief, offered as a dropdown instead of a
+       free-text box so one country is one spelling. UAE is included because the
+       workbook records its projects by emirate (Abu Dhabi); a value already in
+       the data that is not on this list is still offered in the editor, never
+       silently dropped. */
+    var COUNTRY_OPTIONS = [
+        'Australia', 'Armenia', 'Bangladesh', 'Brazil', 'China', 'Colombia', 'Egypt',
+        'Ethiopia', 'India', 'Indonesia', 'Italy', 'Japan', 'Malaysia', 'Mexico',
+        'Morocco', 'Nigeria', 'Panama', 'Philippines', 'Puerto Rico', 'Spain',
+        'Thailand', 'Turkey', 'Ukraine', 'United Arab Emirates', 'United Kingdom',
+        'United States'
+    ];
+
+    /* Country → the two letters a client ID starts with. UK, not the ISO code
+       GB: the IDs are this app's own reference, and the requested format says
+       UK. A blank country gives XX — “not recorded”, never a guess. */
+    var COUNTRY_CODE = {
+        'UK': 'UK', 'United Kingdom': 'UK', 'UNITED KINGDOM': 'UK',
+        'UAE': 'AE', 'United Arab Emirates': 'AE', 'Abu Dhabi': 'AE', 'Dubai': 'AE',
+        'United States': 'US', 'United States of America': 'US', 'USA': 'US',
+        'Ukraine': 'UA', 'Italy': 'IT', 'Spain': 'ES', 'Turkey': 'TR', 'Armenia': 'AM',
+        'Japan': 'JP', 'Morocco': 'MA', 'Egypt': 'EG', 'India': 'IN', 'Bangladesh': 'BD',
+        'Thailand': 'TH', 'China': 'CN', 'Philippines': 'PH', 'Puerto Rico': 'PR',
+        'Mexico': 'MX', 'Panama': 'PA', 'Colombia': 'CO', 'Brazil': 'BR', 'Nigeria': 'NG',
+        'Ethiopia': 'ET', 'Malaysia': 'MY', 'Indonesia': 'ID', 'Australia': 'AU'
+    };
+
+    function countryCodeFor(country) {
+        var name = String(country == null ? '' : country).trim();
+        if (!name || name === '—') return 'XX';
+        return COUNTRY_CODE[name] || 'XX';
+    }
+
+    /** Country choices for a dropdown: the brief's list, plus anything recorded
+     *  that is not on it (matched case-insensitively, so UNITED KINGDOM and
+     *  United Kingdom are not offered twice). */
+    function countryChoices() {
+        var seen = {};
+        var out = COUNTRY_OPTIONS.slice();
+        out.forEach(function (c) { seen[c.toLowerCase()] = 1; });
+        distinctValues('country').forEach(function (c) {
+            if (!seen[c.toLowerCase()]) { out.push(c); seen[c.toLowerCase()] = 1; }
+        });
+        return out;
+    }
 
     var STORAGE_KEY = 'swaProjectInventoryUser';
     var IDENTITY_IMAGE = 'assets/swa_logo.png';
@@ -927,12 +599,9 @@
         return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     }
 
-    /** The image for a row: an explicit one, else a source photograph, else a tile. */
+    /** The image for a row: the picture it was saved with, else a generated tile. */
     function imageFor(row) {
         if (row.image) return row.image;
-        var countryFile = COUNTRY_IMAGE[row.values.country];
-        if (countryFile) return fileUrl(SW_MEDIA + countryFile);
-        if (GALA_IMAGE[row.values.id]) return fileUrl(GALA_IMAGE[row.values.id] + 'NAD_0289.JPG');
         return flagTile(row.values.id, row.values.country);
     }
 
@@ -956,12 +625,350 @@
         } catch (e) { /* storage full or unavailable — the UI still holds the rows */ }
     }
 
-    /** Wrap each sourced array row (in FIELDS order) into a { values } object. */
+    /* ── Attachments ──────────────────────────────────────────────────────
+       Any row — one from the workbook or one added by hand — can carry
+       attachments, stored beside the row (never inside it), so the workbook's
+       17 columns stay exactly as recorded. They are grouped by type on screen.
+
+       Storage honesty: a file up to 1 MB is copied into the app as a data URL,
+       which works offline and in the browser preview. A larger file is NEVER
+       copied — the desktop app keeps a link to the file on disk and says so,
+       and the browser preview refuses it rather than pretending it was saved. */
+    /* IDs used by earlier builds, and the CC-TYPE-YEAR generation this app used
+       until the client-ID scheme below replaced it. Existing attachments, local
+       edits and user-added rows are moved to the current IDs once per map, so a
+       rename can never orphan evidence. */
+    var LEGACY_ID_MAP = {
+        'SW-2025-001': 'UK0125', 'SW-2025-002': 'UK0225',
+        'SW-2025-003': 'UK0325', 'SW-2025-004': 'AE0125',
+        'SW-2024-001': 'UK0124', 'SW-2023-001': 'UK0123',
+        'SW-2022-001': 'UK0122', 'SW-2022-002': 'UK0222',
+        'SW-2021-001': 'XX0121', 'SW-2021-002': 'XX0221',
+        'SW-2021-003': 'XX0321', 'SW-2021-004': 'XX0421',
+        'SW-2021-005': 'XX0521', 'SW-2021-006': 'XX0621',
+        'SW-2021-007': 'XX0721', 'SW-2021-008': 'XX0821',
+        'SW-2020-001': 'XX0120', 'SW-2011-001': 'UK0111'
+    };
+
+    /* The immediately previous scheme (country – type – year), used by every
+       build up to 1.x of this tab. Mapped explicitly so the migration never has
+       to guess which row an ID belonged to. */
+    var PREVIOUS_ID_MAP = {
+        'GB-EDU-2025': 'UK0125', 'GB-EVT-2025': 'UK0225',
+        'GB-ADV-2025': 'UK0325', 'AE-EDU-2025': 'AE0125',
+        'GB-EDU-2024': 'UK0124', 'GB-EVT-2023': 'UK0123',
+        'GB-EDU-2022': 'UK0122', 'GB-WEL-2022': 'UK0222',
+        'XX-EDU-2021': 'XX0121', 'XX-EDU-2021-02': 'XX0221',
+        'XX-EDU-2021-03': 'XX0321', 'XX-WEL-2021': 'XX0421',
+        'XX-WEL-2021-02': 'XX0521', 'XX-GEN-2021': 'XX0621',
+        'XX-EDU-2021-04': 'XX0721', 'XX-EDU-2021-05': 'XX0821',
+        'XX-EDU-2020': 'XX0120', 'GB-WEL-2011': 'UK0111'
+    };
+    var ID_MIGRATION_KEY = 'swaProjectInventoryCcIds';
+    var CLIENT_ID_MIGRATION_KEY = 'swaProjectInventoryClientIds';
+    var ATTACH_KEY = 'swaProjectAttachments';
+
+    /** Move stored attachments, edits and user-added rows onto the current IDs.
+     *  Runs once per map; a migration failure must never block the inventory. */
+    function migrateIds(mapping, markerKey) {
+        try {
+            if (typeof localStorage === 'undefined') return;
+            if (localStorage.getItem(markerKey)) return;
+            [ATTACH_KEY, 'swaProjectInventoryEdits'].forEach(function (key) {
+                var raw = localStorage.getItem(key);
+                if (!raw) return;
+                var store = JSON.parse(raw);
+                if (!store || typeof store !== 'object') return;
+                var changed = false;
+                Object.keys(store).forEach(function (oldId) {
+                    if (!store[oldId]) return;
+                    var newId = mapping[oldId];
+                    if (!newId) return;
+                    if (!store[newId]) store[newId] = store[oldId];
+                    else if (Array.isArray(store[newId]) && Array.isArray(store[oldId])) store[newId] = store[newId].concat(store[oldId]);
+                    else if (typeof store[newId] === 'object' && typeof store[oldId] === 'object') store[newId] = Object.assign({}, store[oldId], store[newId]);
+                    delete store[oldId];
+                    changed = true;
+                });
+                if (changed) localStorage.setItem(key, JSON.stringify(store));
+            });
+            // User-added rows keep their ID inside the row itself.
+            try {
+                var rows = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+                if (Array.isArray(rows)) {
+                    var rowsChanged = false;
+                    rows.forEach(function (row) {
+                        var old = row && row.values ? row.values.id : null;
+                        if (old && mapping[old]) { row.values.id = mapping[old]; rowsChanged = true; }
+                    });
+                    if (rowsChanged) localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+                }
+            } catch (e2) { /* user rows are optional */ }
+            localStorage.setItem(markerKey, '1');
+        } catch (e) { /* a migration failure must never block the inventory */ }
+    }
+
+    migrateIds(LEGACY_ID_MAP, ID_MIGRATION_KEY);
+    migrateIds(PREVIOUS_ID_MAP, CLIENT_ID_MIGRATION_KEY);
+    var ATTACH_EMBED_LIMIT = 1024 * 1024;              // 1 MB copied into app storage
+    var ATTACH_BUDGET = Math.round(4.5 * 1024 * 1024);  // how much a browser page can hold
+    var ATTACH_SEQ = 0;
+    var ATTACHMENT_TYPES = [
+        { key: 'agreement', label: 'Agreement / MOU', icon: '📄' },
+        { key: 'testimony', label: 'Testimonies', icon: '🗣️', what: 'Beneficiary and partner accounts of the project' },
+        { key: 'thankyou', label: 'Thank-you letters', icon: '💌' },
+        { key: 'video', label: 'Videos', icon: '🎬' },
+        { key: 'receipt', label: 'Receipts & payments', icon: '🧾' },
+        { key: 'report', label: 'Reports', icon: '📊' },
+        { key: 'photo', label: 'Photos', icon: '🖼️' },
+        { key: 'other', label: 'Other', icon: '📎' }
+    ];
+
+    function attachTypeMeta(key) {
+        var found = ATTACHMENT_TYPES.filter(function (t) { return t.key === key; })[0];
+        return found || ATTACHMENT_TYPES[ATTACHMENT_TYPES.length - 1];
+    }
+
+    function loadAttachments() {
+        try {
+            var raw = (typeof localStorage !== 'undefined') && localStorage.getItem(ATTACH_KEY);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (e) { return {}; }
+    }
+
+    /** Returns '' on success, or the reason it could not be saved. */
+    function saveAttachments(map) {
+        try {
+            if (typeof localStorage === 'undefined') return 'Storage is not available here.';
+            localStorage.setItem(ATTACH_KEY, JSON.stringify(map || {}));
+            return '';
+        } catch (e) {
+            if (e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message || '')))) {
+                return 'App storage is full — remove some embedded attachments (1 MB each) or use the desktop app to link them instead.';
+            }
+            return 'Could not save the attachments: ' + (e && e.message ? e.message : e);
+        }
+    }
+
+    function attachmentsFor(projectId) {
+        var map = loadAttachments();
+        var list = map[String(projectId)];
+        return Array.isArray(list) ? list.slice() : [];
+    }
+
+    function attachmentHref(a) {
+        if (!a) return '';
+        if (a.stored === 'embed' && a.data) return a.data;
+        if (a.path) return fileUrl(a.path);
+        return '';
+    }
+
+    function attachmentSizeLabel(bytes) {
+        var n = Number(bytes || 0);
+        if (!n) return 'size unknown';
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    /** Best-effort type from the file itself; the user's choice always wins. */
+    function guessAttachmentType(file) {
+        var mime = String((file && file.type) || '').toLowerCase();
+        var name = String((file && file.name) || '').toLowerCase();
+        if (/^video\//.test(mime) || /\.(mp4|m4v|mov|avi|mkv|webm|wmv)$/.test(name)) return 'video';
+        if (/^image\//.test(mime) || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif)$/.test(name)) return 'photo';
+        return 'other';
+    }
+
+    /** The file's real path, in Electron only — never invented in a browser. */
+    function filePathOf(file) {
+        try {
+            if (file && typeof file.path === 'string' && file.path) return file.path;
+        } catch (e) { /* older Electron */ }
+        try {
+            var electron = (typeof require === 'function') ? require('electron') : null;
+            if (electron && electron.webUtils && typeof electron.webUtils.getPathForFile === 'function') {
+                return electron.webUtils.getPathForFile(file) || '';
+            }
+        } catch (e) { /* not Electron */ }
+        return '';
+    }
+
+    function readAsDataUrl(file) {
+        return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () { resolve(String(reader.result || '')); };
+            reader.onerror = function () { reject(reader.error || new Error('the file could not be read')); };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * Copy small files into app storage and link large ones (desktop only).
+     * Resolves with what actually happened: what was added, what was skipped
+     * and why — nothing is dropped silently.
+     */
+    function addAttachments(projectId, typeKey, fileList) {
+        var files = Array.prototype.slice.call(fileList || []);
+        return new Promise(function (resolve) {
+            var map = loadAttachments();
+            var key = String(projectId);
+            var list = Array.isArray(map[key]) ? map[key].slice() : [];
+            var startCount = list.length;
+            var skipped = [];
+            var used = JSON.stringify(map).length;
+            var i = 0;
+
+            function finish(error) {
+                if (list.length) map[key] = list; else delete map[key];
+                var saveError = saveAttachments(map);
+                resolve({
+                    added: list.length - startCount,
+                    skipped: skipped,
+                    error: error || saveError || ''
+                });
+            }
+
+            function next() {
+                if (i >= files.length) { finish(''); return; }
+                var file = files[i++];
+                var chosen = (typeKey && typeKey !== 'auto') ? typeKey : guessAttachmentType(file);
+                var item = {
+                    id: 'att-' + Date.now().toString(36) + '-' + (++ATTACH_SEQ).toString(36),
+                    name: file.name || 'file',
+                    type: chosen,
+                    size: Number(file.size || 0),
+                    mime: file.type || '',
+                    addedAt: new Date().toISOString(),
+                    stored: 'embed',
+                    data: '',
+                    path: ''
+                };
+
+                if (item.size > ATTACH_EMBED_LIMIT) {
+                    var p = filePathOf(file);
+                    if (!p) {
+                        skipped.push({ name: item.name, size: item.size, reason: 'too large to copy (limit 1 MB) and a browser cannot link a local file — use the desktop app, or attach a smaller copy' });
+                        next();
+                        return;
+                    }
+                    if (used > ATTACH_BUDGET) {
+                        skipped.push({ name: item.name, size: item.size, reason: 'the app storage budget is reached — remove some embedded files first' });
+                        next();
+                        return;
+                    }
+                    item.stored = 'link';
+                    item.path = p;
+                    list.push(item);
+                    next();
+                    return;
+                }
+
+                readAsDataUrl(file).then(function (data) {
+                    if (used + data.length > ATTACH_BUDGET) {
+                        skipped.push({ name: item.name, size: item.size, reason: 'the app storage budget (4.5 MB) is reached — remove some embedded files or link it from the desktop app' });
+                        next();
+                        return;
+                    }
+                    item.data = data;
+                    used += data.length;
+                    list.push(item);
+                    next();
+                }).catch(function (e) {
+                    skipped.push({ name: item.name, size: item.size, reason: 'the file could not be read (' + (e && e.message ? e.message : e) + ')' });
+                    next();
+                });
+            }
+
+            next();
+        });
+    }
+
+    function removeAttachment(projectId, attachmentId) {
+        var map = loadAttachments();
+        var key = String(projectId);
+        var list = Array.isArray(map[key]) ? map[key] : [];
+        map[key] = list.filter(function (a) { return a && a.id !== attachmentId; });
+        if (!map[key].length) delete map[key];
+        return saveAttachments(map);
+    }
+
+    function removeAttachmentsFor(projectId) {
+        var map = loadAttachments();
+        if (map[String(projectId)]) {
+            delete map[String(projectId)];
+            return saveAttachments(map);
+        }
+        return '';
+    }
+
+    /* ── Local edits (over the workbook) ──────────────────────────────────
+       The workbook rows are never rewritten. A correction made in the app is
+       stored as an override keyed by the row's original workbook ID, shown with
+       an “edited” mark and resettable — the source value is still known and is
+       disclosed on hover. User-added rows are edited in place.
+
+       The table, the analytics and the exports all use the effective values, so
+       a correction is visible everywhere — it is never a cosmetic overlay. */
+    var EDIT_KEY = 'swaProjectInventoryEdits';
+
+    function loadEdits() {
+        try {
+            var raw = (typeof localStorage !== 'undefined') && localStorage.getItem(EDIT_KEY);
+            if (!raw) return {};
+            var parsed = JSON.parse(raw);
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (e) { return {}; }
+    }
+
+    function saveEdits(map) {
+        try {
+            if (typeof localStorage === 'undefined') return 'Storage is not available here.';
+            localStorage.setItem(EDIT_KEY, JSON.stringify(map || {}));
+            return '';
+        } catch (e) {
+            if (e && (e.name === 'QuotaExceededError' || /quota/i.test(String(e.message || '')))) {
+                return 'App storage is full — remove an attachment or reset some edits.';
+            }
+            return 'Could not save the edits: ' + (e && e.message ? e.message : e);
+        }
+    }
+
+    function countEdits(map) {
+        var n = 0;
+        Object.keys(map || {}).forEach(function (id) {
+            var bucket = map[id];
+            if (bucket && typeof bucket === 'object') n += Object.keys(bucket).length;
+        });
+        return n;
+    }
+
+    /** Attachments stay with the original workbook row even if its ID is edited. */
+    function attachKeyOf(row) {
+        if (!row) return '';
+        if (row.origin === 'built-in' && row.baseId) return row.baseId;
+        return String(row.values && row.values.id != null ? row.values.id : '');
+    }
+
+    /** Wrap each sourced array row (in the workbook's own column order) into a
+     *  { values } object. Always the 17 workbook columns — a hidden column or an
+     *  added one must never shift the mapping of the source arrays. */
     function objectRows(arrays, origin) {
         return (arrays || []).map(function (arr, i) {
             var values = {};
-            FIELDS.forEach(function (f, idx) { values[f.key] = arr[idx] == null ? '' : arr[idx]; });
-            return { id: values.id + '::' + i, values: values, image: '', origin: origin };
+            BUILTIN_FIELDS.forEach(function (f, idx) { values[f.key] = arr[idx] == null ? '' : arr[idx]; });
+            // Columns added in this app belong to every row. Their values live in
+            // the edits map keyed by row ID, so the key must exist here or the
+            // saved value would be dropped when the row is rebuilt.
+            COLUMNS.custom.forEach(function (f) { if (!(f.key in values)) values[f.key] = ''; });
+            var original = {};
+            Object.keys(values).forEach(function (k) { original[k] = values[k]; });
+            return {
+                id: values.id + '::' + i, baseId: values.id, values: values,
+                _original: original, _edited: {}, image: '', origin: origin
+            };
         });
     }
 
@@ -971,12 +978,23 @@
         });
     }
 
-    /** Every row in the inventory: the sourced set plus anything the user added. */
+    /** Every row in the inventory: the sourced set plus anything the user added,
+     *  with any local corrections applied over the workbook values. */
     function allRows() {
-        return objectRows(ALL_PROJECTS, 'built-in')
-            .concat(loadUserProjects().map(function (r, i) {
-                return { id: 'user::' + i, values: r.values, image: r.image || '', origin: 'user', userIndex: i };
-            }));
+        var edits = loadEdits();
+        var builtIn = objectRows(ALL_PROJECTS, 'built-in');
+        builtIn.forEach(function (r) {
+            var bucket = edits[r.baseId];
+            if (!bucket || typeof bucket !== 'object') return;
+            Object.keys(bucket).forEach(function (k) {
+                if (!Object.prototype.hasOwnProperty.call(r.values, k)) return;
+                r.values[k] = bucket[k];
+                r._edited[k] = 1;
+            });
+        });
+        return builtIn.concat(loadUserProjects().map(function (r, i) {
+            return { id: 'user::' + i, values: r.values, image: r.image || '', origin: 'user', userIndex: i, _edited: {} };
+        }));
     }
 
     /* ═══ View model ═════════════════════════════════════════════════════
@@ -993,11 +1011,36 @@
         country: 'all',
         year: 'all',
         gapsOnly: false,
-        columns: 'key',
+        // Every workbook field is a column by default; the "Key fields"
+        // preset is still available but no longer hides columns on first run.
+        columns: 'all',
         page: 1,
         pageSize: 25,
         expanded: {},
         auditOnly: null,
+        // Per-column filters: key -> { text: 'keyword', values: ['exact', ...] }.
+        columnFilters: {},
+        // Open column-filter dropdown: { key, top, left } (fixed positioning).
+        colPop: null,
+        // Inline editing: the column being edited and its unsaved values
+        // (internal row id -> value), so a re-render never loses typing.
+        editColumn: null,
+        editDraft: {},
+        editNotice: '',
+        // One cell being rewritten in place (row id + column key), and whether a
+        // dropdown column has been switched to free text for this edit.
+        cellEdit: null,
+        cellFreeText: false,
+        // The Columns panel: show/hide/add/delete columns.
+        colManager: false,
+        colNotice: '',
+        // Inventory fills the window (the "Full screen" button / Esc).
+        focus: false,
+        // Transient message shown inside one row's attachment panel.
+        attachNotice: null,
+        // The app instance, so Esc can re-render from outside wire().
+        _app: null,
+        _escHandler: null,
         // Set when a tab is chosen explicitly (a click, or a caller switching
         // tabs). The remembered view must not then overwrite that choice.
         _tabChosen: false
@@ -1009,9 +1052,14 @@
             if (!raw) return;
             var v = JSON.parse(raw);
             if (!v || typeof v !== 'object') return;
-            ['sortKey', 'sortDir', 'columns', 'pageSize'].forEach(function (k) {
+            ['sortKey', 'sortDir', 'pageSize'].forEach(function (k) {
                 if (v[k] != null) state[k] = v[k];
             });
+            // Columns are deliberately NOT restored: every launch starts with all
+            // 17 workbook columns on screen. The "Key fields" preset is a view
+            // for the current session only, so a remembered preset can never hide
+            // workbook columns from the next launch.
+            state.columns = 'all';
             if (!state._tabChosen && v.tab != null) state.tab = v.tab;
             if (!/^\d+$/.test(String(state.pageSize))) state.pageSize = 25;
         } catch (e) { /* first run or unreadable — defaults are fine */ }
@@ -1022,7 +1070,7 @@
             if (typeof localStorage === 'undefined') return;
             localStorage.setItem(VIEW_KEY, JSON.stringify({
                 tab: state.tab, sortKey: state.sortKey, sortDir: state.sortDir,
-                columns: state.columns, pageSize: state.pageSize
+                pageSize: state.pageSize
             }));
         } catch (e) { /* not essential */ }
     }
@@ -1075,7 +1123,11 @@
         var s = String(v || '').toLowerCase();
         if (isBlank(v)) return 'Unknown';
         if (s.indexOf('deliver') !== -1) return 'Delivered';
+        // The workbook says "Completed" for a finished project.
+        if (s.indexOf('complet') !== -1) return 'Delivered';
         if (s.indexOf('progress') !== -1) return 'In progress';
+        // ...and "Under procsseding" for one that is still running.
+        if (/under\s*proc/.test(s)) return 'In progress';
         if (s.indexOf('plan') !== -1) return 'Planned';
         if (s.indexOf('clos') !== -1) return 'Closed';
         return 'Other';
@@ -1132,9 +1184,22 @@
             rows = rows.filter(function (r) { return String(r.values.country || '').trim() === state.country; });
         }
         if (state.year !== 'all') {
-            rows = rows.filter(function (r) { return String(r.values.year || '').trim() === state.year; });
+            rows = rows.filter(function (r) { return String(yearOf(r.values.year)) === state.year; });
         }
         if (state.gapsOnly) rows = rows.filter(function (r) { return r._gaps > 0; });
+        Object.keys(state.columnFilters).forEach(function (key) {
+            var f = state.columnFilters[key];
+            if (!f) return;
+            var needle = String(f.text || '').trim().toLowerCase();
+            var picks = f.values || [];
+            if (!needle && !picks.length) return;
+            rows = rows.filter(function (r) {
+                var cell = String(r.values[key] == null ? '' : r.values[key]);
+                if (needle && cell.toLowerCase().indexOf(needle) === -1) return false;
+                if (picks.length && picks.indexOf(cell.trim()) === -1) return false;
+                return true;
+            });
+        });
         if (state.auditOnly) {
             var ids = state.auditOnly;
             rows = rows.filter(function (r) { return ids.indexOf(r.values.id) !== -1; });
@@ -1165,7 +1230,9 @@
 
     function stats(rows) {
         var countries = {}, years = {}, gaps = 0, withAmount = 0, withDate = 0, knownKids = 0, kids = 0;
-        var cells = 0, filled = 0;
+        var cells = 0, filled = 0, attachedRows = 0, attachFiles = 0, editedRows = 0;
+        var attachMap = loadAttachments();
+        var editMap = loadEdits();
         rows.forEach(function (r) {
             var c = String(r.values.country || '').trim();
             if (c && c !== '—') countries[c] = 1;
@@ -1175,26 +1242,42 @@
             if (hasDate(r.values.deliveryDate)) withDate++;
             var n = beneficiaryCount(r.values.beneficiaries);
             if (n != null) { knownKids++; kids += n; }
-            // "Missing information" is a notes column that is filled on EVERY
-            // row by design, so including it would flatter the completeness
-            // figure. The aggregate counts the 15 data fields only.
-            FIELDS.forEach(function (f) {
+            var files = attachMap[r.origin === 'built-in' && r.baseId ? r.baseId : r.values.id];
+            if (Array.isArray(files) && files.length) { attachedRows++; attachFiles += files.length; }
+            if (r.origin === 'built-in' && r.baseId && editMap[r.baseId]) editedRows++;
+            // "Missing information" is a notes column, not a fact about the
+            // project, so it is excluded from the completeness figure. The
+            // aggregate counts every other WORKBOOK field — an added or hidden
+            // column must not move a data-quality figure.
+            BUILTIN_FIELDS.forEach(function (f) {
                 if (f.key === 'missing') return;
                 cells++;
                 if (hasValue(r.values[f.key])) filled++;
             });
         });
         var ys = Object.keys(years).map(Number).sort(function (a, b) { return a - b; });
+        // The year filter must offer the years rows START in (the year the
+        // charts use), otherwise picking the tail of a span (2027 in
+        // "2025–2027") would always return an empty table.
+        var firstYears = {};
+        rows.forEach(function (r) {
+            var y = yearOf(r.values.year);
+            if (y != null) firstYears[y] = 1;
+        });
         return {
             total: rows.length,
             userAdded: rows.filter(function (r) { return r.origin === 'user'; }).length,
             countries: Object.keys(countries).length,
             countryList: Object.keys(countries).sort(),
-            yearList: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
+            yearList: Object.keys(firstYears).map(Number).sort(function (a, b) { return b - a; }),
             range: ys.length ? (ys[0] + '–' + ys[ys.length - 1]) : '—',
             gaps: gaps,
             withAmount: withAmount,
             withDate: withDate,
+            attached: attachedRows,
+            attachFiles: attachFiles,
+            editedRows: editedRows,
+            editedCells: countEdits(editMap),
             kidsKnown: knownKids,
             kidsTotal: kids,
             cells: cells,
@@ -1240,7 +1323,7 @@
         var byYear = Object.keys(byYearMap).map(Number).sort(function (a, b) { return a - b; })
             .map(function (y) { return { year: y, count: byYearMap[String(y)] }; });
 
-        var completeness = FIELDS.map(function (f) {
+        var completeness = BUILTIN_FIELDS.map(function (f) {
             var documented = rows.filter(function (r) { return !isBlank(r.values[f.key]); }).length;
             return {
                 key: f.key, field: f.field,
@@ -1309,8 +1392,8 @@
         });
         if (repeats.length) {
             add('repeat-verdict', 'high', 'The same description appears under two different years',
-                'These rows describe the same work in the same words on two year pages. Either it is one project ' +
-                'reported twice (so a total would count it twice) or two separate grants — the source does not say.',
+                'These rows describe the same work in the same words under two different years. Either it is one project ' +
+                'entered twice (so a total would count it twice) or two separate grants — the workbook does not say.',
                 repeats);
         }
 
@@ -1382,8 +1465,8 @@
         var amountRows = rows.filter(function (r) { return !hasAmount(r.values.donation); });
         if (amountRows.length) {
             add('no-amount', 'info', amountRows.length + ' of ' + rows.length + ' rows state no amount',
-                'The sources publish what was done, not what it cost — and where a total is mentioned it is a note ' +
-                'that the amount was not published. A financial total from this inventory would be built on almost no data.',
+                'The workbook records what was done more often than what it cost. A financial total from this inventory ' +
+                'would be built on the rows that do carry a figure, and not on the rest.',
                 amountRows.map(function (r) { return r.values.id; }));
         }
 
@@ -1395,12 +1478,15 @@
                 rows.filter(function (r) { return beneficiaryCount(r.values.beneficiaries) == null; }).map(function (r) { return r.values.id; }));
         }
 
-        // 11. The same project name in the same year.
+        // 11. The same project name in the same year. Compare the calendar
+        //     year, not the raw cell: "10th May 2021" and "28th June 2021" are
+        //     the same year even though the strings differ.
         var byName = {};
         rows.forEach(function (r) {
             var n = String(r.values.name || '').trim().toLowerCase();
             if (!n) return;
-            var k = String(r.values.year) + '|' + n;
+            var y = yearOf(r.values.year);
+            var k = (y == null ? String(r.values.year) : String(y)) + '|' + n;
             (byName[k] = byName[k] || []).push(r.values.id);
         });
         var sameName = [];
@@ -1410,21 +1496,23 @@
                 'Two rows carry an identical name for one year — check whether one is a duplicate entry.', sameName);
         }
 
-        // 12. A year outside the range the sources cover.
+        // 12. A year outside the range the workbook covers.
         var outside = rows.filter(function (r) {
             var y = yearOf(r.values.year);
             return y != null && (y < 2011 || y > 2026);
         }).map(function (r) { return r.values.id; });
         if (outside.length) {
             add('year-outside', 'medium', 'Year outside 2011–2026',
-                'The sources cover 2011 onwards; a row outside that window is either a typo or a new source.', outside);
+                'The tracker is being filled from 2026 backwards and the earliest row is 2011; a row outside that ' +
+                'window is either a typo or a different source.', outside);
         }
 
         // 13. No source named for the row.
         var noSource = rows.filter(function (r) { return isBlank(r.values.fileLocation); }).map(function (r) { return r.values.id; });
         if (noSource.length) {
-            add('no-source', 'high', 'No source recorded',
-                'The row does not say where the information came from, so it cannot be checked.', noSource);
+            add('no-source', 'high', 'No file location recorded',
+                'The File location cell is empty, so the row does not say which folder or document holds the evidence. ' +
+                'The workbook is the source of the row, but the row still cannot be checked against its own filing.', noSource);
         }
 
         var order = { high: 0, medium: 1, low: 2, info: 3 };
@@ -1514,6 +1602,19 @@
                     var o = {};
                     FIELDS.forEach(function (f) { o[f.field] = r.values[f.key] || ''; });
                     o._origin = r.origin;
+                    o._editedFields = r._edited ? Object.keys(r._edited).map(function (k) {
+                        var f = FIELDS.filter(function (x) { return x.key === k; })[0];
+                        return f ? f.field : k;
+                    }) : [];
+                    // A manifest only — the copied file data stays in the app, so
+                    // the JSON does not balloon to megabytes.
+                    o.Attachments = attachmentsFor(attachKeyOf(r)).map(function (a) {
+                        var meta = attachTypeMeta(a.type);
+                        return {
+                            name: a.name, type: meta.label, typeKey: meta.key,
+                            size: a.size, stored: a.stored, path: a.path || '', addedAt: a.addedAt || ''
+                        };
+                    });
                     return o;
                 })
             };
@@ -1748,8 +1849,8 @@
             '<img src="' + esc(heroImage(app)) + '" alt="SmallWorld Foundation" onerror="this.style.display=\'none\'">' +
             '<div class="pinv-hero-text">' +
             '<h2>SmallWorld Foundation — Project Inventory</h2>' +
-            '<p>' + s.total + ' projects from the foundation’s website, the Instagram profile and the local CAMERA PROJECTS archive — ' +
-            'with what each source could and could not tell us.</p>' +
+            '<p>' + s.total + ' projects from the SmallWorld Project Inventory &amp; Progress Tracker workbook — ' +
+            'the same fields and rows the team records there, with every gap left visible.</p>' +
             '</div>' +
             '<div class="pinv-hero-side">' +
             '<span class="pinv-badge" style="color:#a78bfa;">' + s.total + ' projects</span>' +
@@ -1758,11 +1859,11 @@
             '</div>' +
 
             '<div class="pinv-stats">' +
-            statTile(s.total, 'Projects', 'Rows in the inventory, sourced plus your own additions') +
+            statTile(s.total, 'Projects', 'Rows imported from the tracker workbook plus your own additions') +
             statTile(s.countries, 'Countries', s.countryList.slice(0, 6).join(', ') + (s.countryList.length > 6 ? '…' : '')) +
-            statTile(s.range, 'Years covered', 'First and last year found in the sources') +
-            statTile(s.documented + '%', 'Fields filled in', s.filled + ' of ' + s.cells + ' data-field cells hold a value — a dash, or “not published”, counts as empty, and the notes column is excluded') +
-            statTile(s.withAmount, 'Amounts stated (of ' + s.total + ')', 'Rows that state a real amount — the biggest hole in this data') +
+            statTile(s.range, 'Years covered', 'First and last year recorded in the workbook') +
+            statTile(s.documented + '%', 'Fields filled in', s.filled + ' of ' + s.cells + ' data-field cells hold a value — a dash counts as empty, and the notes column is excluded') +
+            statTile(s.withAmount, 'Amounts stated (of ' + s.total + ')', 'Rows whose donation cell records an amount — the biggest hole in this data') +
             statTile(s.userAdded, 'Added by you', 'Projects you recorded yourself in this app') +
             '</div>' +
 
@@ -1778,7 +1879,7 @@
             (hasChart ? '<div class="pinv-canvas-wrap"><canvas id="pinvCountryChart"></canvas></div>' : barList(a.byCountry, s.total)) +
             '</div>' +
             '<div class="pinv-chart-card"><h4>Project status</h4>' +
-            '<p class="pinv-muted">Grouped from the wording in the source: “Delivered (as reported)” counts as Delivered.</p>' +
+            '<p class="pinv-muted">Grouped from the wording in the workbook: “Completed” counts as Delivered, “Under procsseding” as In progress.</p>' +
             (hasChart ? '<div class="pinv-canvas-wrap"><canvas id="pinvStatusChart"></canvas></div>' : barList(statusEntries, statusTotal)) +
             '</div>' +
             '<div class="pinv-chart-card"><h4>Type of support</h4>' +
@@ -1796,11 +1897,14 @@
             '<tr><th>Rows with a city/town recorded</th><td>' + locationRows + ' of ' + s.total + '</td></tr>' +
             '<tr><th>Rows with an amount</th><td>' + s.withAmount + ' of ' + s.total + '</td></tr>' +
             '<tr><th>Rows with a delivery date</th><td>' + s.withDate + ' of ' + s.total + '</td></tr>' +
-            '<tr><th>Rows still carrying gaps</th><td>' + s.gaps + ' of ' + s.total + ' (every row asks for something more)</td></tr>' +
+            '<tr><th>Rows with attachments</th><td>' + s.attached + ' of ' + s.total +
+            (s.attachFiles ? ' (' + s.attachFiles + ' files)' : '') + '</td></tr>' +
+            '<tr><th>Rows with “Missing information” filled in</th><td>' + s.gaps + ' of ' + s.total + '</td></tr>' +
             '</table>' +
             '<p class="pinv-muted" style="font-size:.74rem;">The beneficiary figures are deliberately not added up: they count ' +
-            'different things (a party for 200, a surgery for 1), some rows describe the same project on two year pages, and a total ' +
-            'would imply a precision the sources do not have.</p>' +
+            'different things (a school programme with 1,000+ pupils, a single course with 10), and a total would imply a ' +
+            'precision the workbook does not have. The workbook leaves the “Missing information” column blank, so the ' +
+            'double-check below reports the gaps each row actually shows.</p>' +
             '</div>' +
 
             '<div class="card pinv-card"><div class="pinv-card-title">🧩 Where the data is strong and where it is thin</div>' +
@@ -1926,11 +2030,13 @@
 
     var KEY_FIELDS = ['id', 'year', 'name', 'country', 'category', 'status', 'missing'];
 
-    /** Columns actually shown, in the guide's order. */
+    /** Columns actually shown, in the guide's order, then the added ones. */
     function visibleFields() {
-        return state.columns === 'key'
-            ? FIELDS.filter(function (f) { return KEY_FIELDS.indexOf(f.key) !== -1; })
-            : FIELDS;
+        if (state.columns !== 'key') return FIELDS;
+        var custom = COLUMNS.custom.map(function (f) { return f.key; });
+        return FIELDS.filter(function (f) {
+            return KEY_FIELDS.indexOf(f.key) !== -1 || custom.indexOf(f.key) !== -1;
+        });
     }
 
     function statusOptions() {
@@ -1954,8 +2060,69 @@
         }).join('');
     }
 
+    /** One attachment's row inside the expanded project. */
+    function renderAttachmentItem(projectId, a) {
+        var meta = attachTypeMeta(a.type);
+        var href = attachmentHref(a);
+        var name = esc(a.name || 'file');
+        var nameHtml = href
+            ? '<a class="pinv-attach-name" href="' + esc(href) + '"' +
+              (a.stored === 'embed' ? ' download="' + name + '"' : ' target="_blank" rel="noopener"') +
+              ' title="' + esc(a.path || a.name || '') + '">' + name + '</a>'
+            : '<span class="pinv-attach-name">' + name + '</span>';
+        return '<div class="pinv-attach-item">' +
+            '<span class="pinv-attach-fileicon">' + esc(meta.icon) + '</span>' +
+            nameHtml +
+            '<span class="pinv-attach-meta">' + esc(attachmentSizeLabel(a.size)) +
+            (a.stored === 'link' ? ' · linked file' : ' · copied into the app') + '</span>' +
+            '<button class="pinv-attach-del" data-attach-del="' + esc(a.id) + '" data-attach-for="' + esc(projectId) + '" ' +
+            'title="Remove this attachment" aria-label="Remove ' + name + '">✕</button>' +
+            '</div>';
+    }
+
+    /** Attachments for one project, grouped and counted by type. */
+    function renderAttachments(projectId, attachments) {
+        var groups = {};
+        (attachments || []).forEach(function (a) {
+            var k = attachTypeMeta(a.type).key;
+            (groups[k] = groups[k] || []).push(a);
+        });
+        var grouped = ATTACHMENT_TYPES.filter(function (t) { return groups[t.key]; }).map(function (t) {
+            var items = groups[t.key];
+            return '<div class="pinv-attach-group">' +
+                '<div class="pinv-attach-group-title">' + esc(t.icon) + ' ' + esc(t.label) +
+                ' <span class="pinv-muted">' + items.length + '</span></div>' +
+                items.map(function (a) { return renderAttachmentItem(projectId, a); }).join('') +
+                '</div>';
+        }).join('');
+
+        var notice = (state.attachNotice && state.attachNotice.id === projectId) ? state.attachNotice : null;
+        var options = '<option value="auto">Auto (by file type)</option>' + ATTACHMENT_TYPES.map(function (t) {
+            return '<option value="' + t.key + '">' + esc(t.icon + ' ' + t.label) + '</option>';
+        }).join('');
+
+        return '<div class="pinv-attach" data-attach-project="' + esc(projectId) + '">' +
+            '<div class="pinv-attach-head">' +
+            '<div class="pinv-attach-title">📎 Attachments <span class="pinv-muted">' +
+            (attachments.length ? attachments.length + ' file' + (attachments.length === 1 ? '' : 's') + ' · grouped by type' : 'none yet — choose a type, then add files') +
+            '</span></div>' +
+            '<div class="pinv-attach-controls">' +
+            '<select data-attach-type="' + esc(projectId) + '" title="Attachment type for the files you add">' + options + '</select>' +
+            '<label class="btn btn-secondary pinv-attach-pick" title="Attach files to this project">＋ Add files' +
+            '<input type="file" multiple data-attach-input="' + esc(projectId) + '"></label>' +
+            '</div></div>' +
+            (notice ? '<p class="pinv-attach-status' + (notice.error ? ' error' : '') + '">' + esc(notice.text) + '</p>' : '') +
+            (grouped || '<p class="pinv-muted" style="margin:.3rem 0 0;font-size:.76rem;">No attachments yet.</p>') +
+            '<p class="pinv-attach-note">Files up to 1 MB are copied into this app, so they open offline and in the browser preview. ' +
+            'Larger files are never copied — the desktop app keeps a link to the file on disk. Attachments live beside the row; ' +
+            'the 17 workbook columns stay exactly as recorded.</p>' +
+            '</div>';
+    }
+
     function renderInventoryTable(rows) {
         var fields = visibleFields();
+        var editField = state.editColumn ? FIELDS.filter(function (f) { return f.key === state.editColumn; })[0] : null;
+        var editDraftCount = Object.keys(state.editDraft).length;
         var size = String(state.pageSize) === 'all' ? rows.length : parseInt(state.pageSize, 10);
         var pages = Math.max(1, Math.ceil(rows.length / (size || 25)));
         if (state.page > pages) state.page = pages;
@@ -1963,39 +2130,83 @@
         var pageRows = String(state.pageSize) === 'all' ? rows : rows.slice(start, start + size);
         var offset = String(state.pageSize) === 'all' ? 0 : start;
 
-        var head = '<th class="pinv-sticky" title="Identification — a photograph of the project where the sources have one, otherwise a generated tile">Picture</th>' +
-            '<th data-sort="index" title="Sort by the order the rows were recorded">#</th>' +
+        var head = '<th class="pinv-sticky" title="Identification — a photograph of the project where the sources have one, otherwise a generated tile"><span class="pinv-th-inner"><span class="pinv-th-label">Picture</span></span></th>' +
+            '<th class="pinv-numcol" data-sort="index" title="Sort by the order the rows were recorded"><span class="pinv-th-inner"><span class="pinv-th-label">#</span></span></th>' +
             fields.map(function (f) {
                 var on = state.sortKey === f.key;
-                return '<th data-sort="' + f.key + '" title="Sort by ' + esc(f.field) + ' — ' + esc(f.what) + '">' + esc(f.field) +
-                    '<span class="pinv-sort">' + (on ? (state.sortDir > 0 ? '▲' : '▼') : '↕') + '</span></th>';
-            }).join('') + '<th></th>';
+                var cf = state.columnFilters[f.key];
+                var active = !!(cf && ((cf.text && String(cf.text).trim()) || (cf.values && cf.values.length)));
+                var thCls = (on ? 'pinv-active ' : '') + ((active || state.editColumn === f.key) ? 'pinv-hasfilter ' : '') +
+                    (f.key === 'id' ? 'pinv-idcol' : '');
+                return '<th data-sort="' + f.key + '" data-key="' + f.key + '"' + (thCls.trim() ? ' class="' + thCls.trim() + '"' : '') +
+                    ' title="Sort by ' + esc(f.field) + ' — ' + esc(f.what) + '"><span class="pinv-th-inner">' +
+                    '<span class="pinv-th-label">' + esc(f.field) + '</span>' +
+                    '<span class="pinv-sort">' + (on ? (state.sortDir > 0 ? '▲' : '▼') : '↕') + '</span>' +
+                    '<span class="pinv-th-actions">' +
+                    '<button class="pinv-colfilter' + (active ? ' active' : '') + '" data-colfilter="' + f.key + '" ' +
+                    'title="Filter ' + esc(f.field) + ' by a value or keyword" aria-label="Filter ' + esc(f.field) + '">▾</button>' +
+                    '<button class="pinv-editcol' + (state.editColumn === f.key ? ' active' : '') + '" data-editcol="' + f.key + '" ' +
+                    'title="Edit ' + esc(f.field) + ' values inline" aria-label="Edit ' + esc(f.field) + '">✎</button>' +
+                    '</span></span></th>';
+            }).join('') + '<th class="pinv-numcol"></th>';
 
         var body = pageRows.map(function (r) {
             var open = !!state.expanded[r.values.id];
             var badge = r.origin === 'user' ? '<span class="pinv-badge user">yours</span>' : '';
             var cells = fields.map(function (f) {
                 var v = r.values[f.key] || '';
-                var cls = isBlank(v) ? ' pinv-flag' : '';
-                if (f.key === 'id') return '<td class="pinv-id">' + esc(v) + badge + '</td>';
+                var blank = isBlank(v);
+                var cls = blank ? ' pinv-blank' : '';
+                var attrs = ' data-cell-row="' + esc(r.id) + '" data-cell-key="' + f.key + '"';
+                if (state.editColumn === f.key) {
+                    var hasDraft = Object.prototype.hasOwnProperty.call(state.editDraft, r.id);
+                    var shown = hasDraft ? state.editDraft[r.id] : String(v);
+                    return '<td class="pinv-editing"' + attrs + '><input class="pinv-cellinput" data-cell-row="' + esc(r.id) +
+                        '" data-cell-key="' + f.key + '" list="pinvEditList" autocomplete="off" value="' + esc(shown) + '" ' +
+                        'aria-label="' + esc(f.field) + ' for ' + esc(r.values.id) + '"></td>';
+                }
+                // Double-click any cell to rewrite just that cell, with a
+                // dropdown when the column has a known set of values.
+                if (state.cellEdit && state.cellEdit.row === r.id && state.cellEdit.key === f.key) {
+                    return renderCellEditor(r, f);
+                }
+                var edited = !!(r._edited && r._edited[f.key]);
+                var editedCls = edited ? ' pinv-edited' : '';
+                var hasOriginal = !!(r._original && Object.prototype.hasOwnProperty.call(r._original, f.key));
+                var editedTitle = edited
+                    ? (hasOriginal
+                        ? 'Edited in this app — the workbook says: ' + String(r._original[f.key] == null ? '' : r._original[f.key])
+                        : 'Typed into a column added in this app')
+                    : '';
+                if (f.key === 'id') {
+                    var files = attachmentsFor(attachKeyOf(r)).length;
+                    var clip = files ? '<span class="pinv-attach-count" title="' + files + ' attachment' + (files === 1 ? '' : 's') + ' on this project">📎 ' + files + '</span>' : '';
+                    return '<td class="pinv-id pinv-idcol' + editedCls + '"' + attrs + (editedTitle ? ' title="' + esc(editedTitle) + '"' : '') + '>' + esc(v) + badge + clip + '</td>';
+                }
                 if (f.key === 'status') {
                     var g = statusGroup(v);
-                    return '<td><span class="pinv-badge ' + (g === 'Delivered' ? 'delivered' : (g === 'Planned' ? 'planned' : 'progress')) + '">' + esc(g) + '</span>' +
+                    return '<td class="pinv-status-cell' + editedCls + '"' + attrs + ' title="' + esc(v) + '">' +
+                        '<span class="pinv-badge ' + (g === 'Delivered' ? 'delivered' : (g === 'Planned' ? 'planned' : 'progress')) + '">' + esc(g) + '</span>' +
                         '<div class="pinv-sub">' + esc(v) + '</div></td>';
                 }
                 if (f.key === 'year' && isYearRange(v)) {
-                    return '<td>⚑ ' + esc(v) + '<div class="pinv-sub" title="A span, not a single year">span</div></td>';
+                    return '<td' + attrs + (editedTitle ? ' title="' + esc(editedTitle) + '"' : '') + '>' +
+                        '<span class="pinv-clamp">⚑ ' + esc(v) + '</span>' +
+                        '<div class="pinv-sub" title="A span, not a single year">span</div></td>';
                 }
-                var title = String(v).length > 60 ? ' title="' + esc(v) + '"' : '';
-                return '<td' + (cls ? ' class="' + cls.trim() + '"' : '') + title + '><span class="pinv-clamp">' + esc(v) + '</span></td>';
+                var title = editedTitle || (String(v).length > 30 ? v : '');
+                return '<td' + attrs + (cls || edited ? ' class="' + (cls + editedCls).trim() + '"' : '') + (title ? ' title="' + esc(title) + '"' : '') +
+                    '>' + (blank
+                        ? '<span class="pinv-dash" aria-label="nothing recorded">—</span>'
+                        : '<span class="pinv-clamp">' + esc(v) + '</span>') + '</td>';
             }).join('');
 
             var main = '<tr class="' + (open ? 'pinv-open' : '') + '" data-row="' + esc(r.values.id) + '">' +
-                '<td class="pinv-sticky"><img class="pinv-thumb" src="' + esc(imageFor(r)) + '" alt="" loading="lazy" ' +
+                '<td class="pinv-sticky pinv-art"><img class="pinv-thumb" src="' + esc(imageFor(r)) + '" alt="" loading="lazy" ' +
                 'onerror="this.onerror=null;this.src=this.dataset.fallback" data-fallback="' + esc(flagTile(r.values.id, r.values.country)) + '"></td>' +
                 '<td class="pinv-num">' + (offset + pageRows.indexOf(r) + 1) + '</td>' +
                 cells +
-                '<td class="pinv-num"><button class="pinv-expand" data-expand="' + esc(r.values.id) + '" aria-expanded="' + open + '" title="' +
+                '<td class="pinv-num pinv-expandcell"><button class="pinv-expand" data-expand="' + esc(r.values.id) + '" aria-expanded="' + open + '" title="' +
                 (open ? 'Hide every field' : 'Show every field for this project') + '">' + (open ? '▾' : '▸') + '</button></td>' +
                 '</tr>';
 
@@ -2003,8 +2214,13 @@
 
             var detail = FIELDS.map(function (f) {
                 var v = r.values[f.key] || '';
+                var isEdited = !!(r._edited && r._edited[f.key]);
+                var hasOrig = !!(r._original && Object.prototype.hasOwnProperty.call(r._original, f.key));
                 return '<div class="pinv-detail-field' + (isBlank(v) ? ' pinv-flag' : '') + '">' +
-                    '<dt>' + esc(f.field) + '</dt><dd>' + esc(v) + '<div class="pinv-muted">' + esc(f.what) + '</div></dd></div>';
+                    '<dt>' + esc(f.field) + (isEdited ? ' <span class="pinv-edited-tag">edited</span>' : '') + '</dt>' +
+                    '<dd>' + esc(v) +
+                    (isEdited && hasOrig ? '<div class="pinv-edited-orig">Workbook value: ' + esc(r._original[f.key]) + '</div>' : '') +
+                    '<div class="pinv-muted">' + esc(f.what) + '</div></dd></div>';
             }).join('');
             var actions = r.origin === 'user'
                 ? '<button class="btn btn-secondary pinv-edit" data-user="' + r.userIndex + '" style="font-size:.7rem;padding:.2rem .5rem;">Edit</button>' +
@@ -2017,12 +2233,15 @@
                 return '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(u.replace(/^https?:\/\//, '').slice(0, 40)) + ' ↗</a>';
             }).join(' ');
 
-            return main + '<tr class="pinv-detail-row"><td class="pinv-sticky pinv-detail-art">' +
+            // The detail block spans the picture + ID columns, so the 64px preview
+            // has room inside the sticky block instead of overflowing it.
+            return main + '<tr class="pinv-detail-row"><td class="pinv-sticky pinv-detail-art" colspan="2">' +
                 '<img src="' + esc(imageFor(r)) + '" alt="" loading="lazy" onerror="this.onerror=null;this.src=this.dataset.fallback" data-fallback="' + esc(flagTile(r.values.id, r.values.country)) + '">' +
                 '<div class="pinv-detail-id">' + esc(r.values.id) + '</div>' +
                 (links ? '<div class="pinv-detail-links">' + links + '</div>' : '') +
-                '</td><td colspan="' + (fields.length + 2) + '">' +
+                '</td><td colspan="' + (fields.length + 1) + '">' +
                 '<dl class="pinv-detail">' + detail + '</dl>' +
+                renderAttachments(attachKeyOf(r), attachmentsFor(attachKeyOf(r))) +
                 (actions ? '<div class="pinv-row-actions">' + actions + '</div>' : '') +
                 '</td></tr>';
         }).join('');
@@ -2030,6 +2249,29 @@
         if (!rows.length) {
             return '<div class="pinv-empty">No rows match this filter. Clear the search or the filters above.</div>';
         }
+
+        var editBar = state.editColumn && editField
+            ? '<div class="pinv-editbar">' +
+              '<span>✎ Editing <b>' + esc(editField.field) + '</b> — type a value or pick a suggestion. ' +
+              '<span id="pinvEditCount">' + (editDraftCount ? '<b>' + editDraftCount + '</b> unsaved change' + (editDraftCount === 1 ? '' : 's') + '.' : '') + '</span></span>' +
+              '<span class="pinv-editbar-actions">' +
+              '<button id="pinvEditSave" class="btn btn-primary" style="font-size:.74rem;">Save changes</button>' +
+              '<button id="pinvEditCancel" class="btn btn-secondary" style="font-size:.74rem;">Cancel</button>' +
+              '</span></div>'
+            : '';
+
+        var listValues = {};
+        if (state.editColumn) {
+            allRows().forEach(function (rr) {
+                var val = String(rr.values[state.editColumn] == null ? '' : rr.values[state.editColumn]).trim();
+                if (val && val !== '—') listValues[val] = 1;
+            });
+        }
+        var dataList = state.editColumn
+            ? '<datalist id="pinvEditList">' + Object.keys(listValues).slice(0, 500).map(function (val) {
+                return '<option value="' + esc(val) + '"></option>';
+            }).join('') + '</datalist>'
+            : '';
 
         var pager = '';
         if (String(state.pageSize) !== 'all' && pages > 1) {
@@ -2040,13 +2282,303 @@
                 '</div>';
         }
 
-        return '<div class="pinv-table-wrap"><table class="pinv-table"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + pager;
+        // Fixed column widths (not auto layout): every row is the same height and
+        // a long description can never push a column wider than its budget.
+        var cols = '<colgroup><col class="pinv-col-art"><col class="pinv-col-num">' +
+            fields.map(function (f) { return '<col style="width:' + columnWidth(f) + 'px">'; }).join('') +
+            '<col class="pinv-col-num"></colgroup>';
+
+        return editBar + '<div class="pinv-table-wrap"><table class="pinv-table">' + cols +
+            '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+            dataList + pager + renderColumnFilterPopover();
+    }
+
+    /** Width budget per column, in pixels. Workbook columns get a hand-picked
+        width so the grid reads like a spreadsheet; an added column gets a
+        sensible default by type. */
+    function columnWidth(f) {
+        var widths = {
+            id: 112, year: 104, name: 236, country: 112, location: 146,
+            org: 204, instType: 138, description: 248, category: 168,
+            beneficiaries: 168, donation: 112, deliveryDate: 148, status: 126,
+            documentation: 176, fileLocation: 158, missing: 168, duration: 138
+        };
+        if (Object.prototype.hasOwnProperty.call(widths, f.key)) return widths[f.key];
+        return f.type === 'dropdown' ? 148 : 168;
+    }
+
+    /** The per-column dropdown: exact values, a keyword, or both. */
+    function renderColumnFilterPopover() {
+        if (!state.colPop) return '';
+        var key = state.colPop.key;
+        var field = FIELDS.filter(function (f) { return f.key === key; })[0];
+        if (!field) return '';
+        var seen = {};
+        allRows().forEach(function (r) {
+            var v = String(r.values[key] == null ? '' : r.values[key]).trim();
+            if (v && v !== '—') seen[v] = 1;
+        });
+        var values = Object.keys(seen).sort(function (a, b) {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        });
+        var cur = state.columnFilters[key] || { text: '', values: [] };
+        var picked = cur.values || [];
+        var top = Math.max(8, state.colPop.top || 8);
+        var left = Math.max(8, state.colPop.left || 8);
+        return '<div class="pinv-colpop" data-colpop="' + esc(key) + '" style="top:' + top + 'px;left:' + left + 'px;">' +
+            '<div class="pinv-colpop-head"><strong>Filter — ' + esc(field.field) + '</strong>' +
+            '<button class="pinv-colpop-close" data-colpop-close="1" title="Close" aria-label="Close">✕</button></div>' +
+            '<input type="search" data-colpop-text placeholder="Keyword in this column…" value="' + esc(cur.text || '') + '" spellcheck="false">' +
+            '<div class="pinv-colpop-values">' +
+            (values.length
+                ? values.slice(0, 200).map(function (v) {
+                    return '<label><input type="checkbox" data-colpop-value="' + esc(v) + '"' +
+                        (picked.indexOf(v) !== -1 ? ' checked' : '') + '> <span title="' + esc(v) + '">' + esc(v) + '</span></label>';
+                }).join('') + (values.length > 200 ? '<div class="pinv-muted" style="font-size:.66rem;">' + (values.length - 200) + ' more — narrow it with the keyword box.</div>' : '')
+                : '<div class="pinv-muted" style="font-size:.68rem;">No values recorded in this column.</div>') +
+            '</div>' +
+            '<div class="pinv-colpop-actions">' +
+            '<button class="btn btn-secondary" data-colpop-edit="1" style="font-size:.72rem;margin-right:auto;">✎ Edit column</button>' +
+            '<button class="btn btn-secondary" data-colpop-clear="1" style="font-size:.72rem;">Clear</button>' +
+            '<button class="btn btn-primary" data-colpop-apply="1" style="font-size:.72rem;">Apply</button>' +
+            '</div></div>';
+    }
+
+    /* ── One-cell editing (double-click any cell) ──────────────────────────
+       Every column is editable, including the 17 workbook columns: a workbook
+       correction is stored as an override (marked “edited”, resettable), it
+       never rewrites the source. Columns with a known set of values offer a
+       dropdown; free-text columns offer a suggestion list and accept anything. */
+
+    /* Workbook columns whose values repeat, so a dropdown is the right control. */
+    var CELL_SELECTS = ['status', 'country', 'instType', 'category', 'year'];
+
+    /** Distinct non-blank values recorded in one column, alphabetically. */
+    function distinctValues(key) {
+        var seen = {};
+        allRows().forEach(function (r) {
+            var v = String(r.values[key] == null ? '' : r.values[key]).trim();
+            if (v && v !== '—') seen[v] = 1;
+        });
+        return Object.keys(seen).sort(function (a, b) {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        }).slice(0, 120);
+    }
+
+    /** Options for the editor: a dropdown column's own list, a known-set column's
+     *  recorded values, or none (free text). */
+    function cellOptions(f) {
+        if (f.type === 'select') return (f.options || []).slice();
+        if (f.key === 'country') return countryChoices();
+        if (CELL_SELECTS.indexOf(f.key) !== -1) return distinctValues(f.key);
+        return [];
+    }
+
+    function renderCellEditor(r, f) {
+        var v = String(r.values[f.key] == null ? '' : r.values[f.key]);
+        var opts = cellOptions(f);
+        var at = ' data-cell-row="' + esc(r.id) + '" data-cell-key="' + f.key + '"';
+        var label = f.field + ' for ' + (r.values.id || 'this row');
+
+        if (opts.length && !state.cellFreeText) {
+            if (opts.indexOf(v) === -1 && v) opts = [v].concat(opts);
+            var choices = '<option value=""' + (v ? '' : ' selected') + '>—</option>' +
+                opts.map(function (o) {
+                    return '<option value="' + esc(o) + '"' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>';
+                }).join('') +
+                '<option value="__free">✎ Type a different value…</option>';
+            return '<td class="pinv-editing-cell pinv-cellselect"' + at + '>' +
+                '<select class="pinv-cellinput" data-cell-commit="1"' + at +
+                ' aria-label="' + esc(label) + ' — choose a value">' + choices + '</select></td>';
+        }
+
+        return '<td class="pinv-editing-cell"' + at + '>' +
+            '<input class="pinv-cellinput" data-cell-commit="1"' + at +
+            ' list="pinvCellList" autocomplete="off" spellcheck="false" value="' + esc(v) + '"' +
+            ' aria-label="' + esc(label) + '"></td>';
+    }
+
+    function startCellEdit(app, rowId, key) {
+        if (!rowId || !key) return;
+        if (state.editColumn) {          // leave the bulk editor cleanly
+            state.editColumn = null;
+            state.editDraft = {};
+        }
+        state.cellEdit = { row: rowId, key: key };
+        state.cellFreeText = false;
+        state.colPop = null;
+        renderPage(app);
+        var el = document.querySelector('.pinv-editing-cell .pinv-cellinput');
+        if (el && el.focus) {
+            el.focus();
+            if (el.select) { try { el.select(); } catch (e) { /* some inputs refuse */ } }
+        }
+    }
+
+    function cancelCellEdit(app) {
+        if (!state.cellEdit) return;
+        state.cellEdit = null;
+        state.cellFreeText = false;
+        renderPage(app);
+    }
+
+    function commitCellEdit(app, value) {
+        var target = state.cellEdit;
+        if (!target) return;
+        var row = allRows().filter(function (r) { return r.id === target.row; })[0];
+        state.cellEdit = null;
+        state.cellFreeText = false;
+        if (!row) { renderPage(app); return; }
+        applyEdits(app, target.key, [{ row: row, value: String(value == null ? '' : value).trim() }], 'Cell');
+    }
+
+    /**
+     * Write a set of { row, value } changes for one column. This is the single
+     * place an edit is persisted, so the cell editor and the bulk column editor
+     * validate, disclose and store a change identically.
+     */
+    function applyEdits(app, key, proposed, what) {
+        var current = function (r) { return String(r.values[key] == null ? '' : r.values[key]).trim(); };
+        var changes = [];
+        (proposed || []).forEach(function (c) {
+            if (!c || !c.row) return;
+            if (c.value === current(c.row)) return;
+            changes.push(c);
+        });
+        if (!changes.length) {
+            state.editNotice = 'No change — the cell already holds that value.';
+            renderPage(app);
+            return;
+        }
+
+        // Validate IDs before writing anything: empty, malformed or duplicated
+        // IDs would break the row/attachment identity.
+        var problems = [];
+        if (key === 'id') {
+            var rows = allRows();
+            var projected = {};
+            rows.forEach(function (r) { projected[r.id] = r.values.id; });
+            changes.forEach(function (c) {
+                if (!c.value) problems.push('Project ID cannot be empty.');
+                else if (!/^[A-Z]{2}\d{4}$/.test(c.value)) problems.push('“' + c.value + '” does not follow the client-ID pattern (for example UK0126 — country, a 2-digit number, then the 2-digit year).');
+                projected[c.row.id] = c.value;
+            });
+            var seen = {};
+            Object.keys(projected).forEach(function (rid) {
+                if (seen[projected[rid]]) problems.push('Two rows would share the ID ' + projected[rid] + ' — edit one of them.');
+                seen[projected[rid]] = 1;
+            });
+        }
+        if (problems.length) {
+            state.editNotice = problems[0];
+            renderPage(app);
+            return;
+        }
+
+        var edits = loadEdits();
+        var users = loadUserProjects();
+        var saved = 0;
+        changes.forEach(function (c) {
+            var r = c.row;
+            if (r.origin === 'user') {
+                var u = users[r.userIndex];
+                if (!u || !u.values) return;
+                var oldId = u.values.id;
+                u.values[key] = c.value || '—';
+                if (key === 'id' && oldId && oldId !== c.value) {
+                    var at = loadAttachments();
+                    if (at[oldId]) { at[c.value] = at[oldId]; delete at[oldId]; saveAttachments(at); }
+                }
+                saved++;
+                return;
+            }
+            var bucket = edits[r.baseId] = edits[r.baseId] || {};
+            var original = r._original ? String(r._original[key] == null ? '' : r._original[key]) : '';
+            if (c.value === original) delete bucket[key];
+            else bucket[key] = c.value;
+            if (!Object.keys(bucket).length) delete edits[r.baseId];
+            saved++;
+        });
+        saveUserProjects(users);
+        var err = saveEdits(edits);
+        if (err) {
+            state.editNotice = err;
+            renderPage(app);
+            return;
+        }
+        state.editColumn = null;
+        state.editDraft = {};
+        state.editNotice = saved + ' value' + (saved === 1 ? '' : 's') + ' updated' +
+            (key === 'id' ? ' — attachments stay with the row.' : '.');
+        if (app && app.logBuildEvent) app.logBuildEvent('project-inventory-edit', saved + ' ' + key + ' value(s) updated' + (what ? ' (' + what + ')' : ''));
+        renderPage(app);
+    }
+
+    /* ── Columns manager: show, hide, add, delete ──────────────────────────
+       Workbook columns are hidden, never deleted — the source data and the
+       exported workbook keep all 17. A column added here is a real column: it is
+       stored, exported and editable like the rest, and deleting it removes the
+       values typed into it. */
+    function renderColumnsManager() {
+        if (!state.colManager) return '';
+        var row = function (f, custom) {
+            var on = COLUMNS.hidden.indexOf(f.key) === -1;
+            return '<label class="pinv-colrow">' +
+                '<input type="checkbox" data-coltoggle="' + esc(f.key) + '"' + (on ? ' checked' : '') + '>' +
+                '<span class="pinv-colname">' + esc(f.field) + '</span>' +
+                '<span class="pinv-coltype">' + (custom
+                    ? (f.locked ? 'tracker · locked' : (f.type === 'select' ? 'dropdown · ' + (f.options || []).length + ' options' : 'added column'))
+                    : 'workbook') + '</span>' +
+                (custom
+                    ? (f.locked
+                        ? '<span class="pinv-collock" title="Part of the tracker — hide it instead of deleting it">🔒</span>'
+                        : '<button class="pinv-coldel" data-coldel="' + esc(f.key) + '" title="Delete this column and the values typed into it" aria-label="Delete ' + esc(f.field) + '">✕</button>')
+                    : '') +
+                '</label>';
+        };
+        return '<div class="card pinv-card pinv-colmanager" id="pinvColManager">' +
+            '<div class="pinv-card-title">▦ Columns — show, hide, add or remove</div>' +
+            '<p class="pinv-muted" style="font-size:.76rem;line-height:1.5;margin:-.2rem 0 .7rem;">' +
+            'Workbook columns are <b>hidden, never deleted</b> — the recorded values stay intact and can be shown again at any time. ' +
+            'Columns you add are yours: text or a dropdown, editable per cell, and included in the table and the exports.</p>' +
+            '<div class="pinv-collist">' +
+            BUILTIN_FIELDS.map(function (f) { return row(f, false); }).join('') +
+            COLUMNS.custom.map(function (f) { return row(f, true); }).join('') +
+            '</div>' +
+            '<div class="pinv-addcol">' +
+            '<input type="text" id="pinvNewColName" placeholder="New column name (e.g. Contact person)" maxlength="80">' +
+            '<select id="pinvNewColType" title="Text: type any value. Dropdown: pick from the options below.">' +
+            '<option value="text">Text</option><option value="select">Dropdown</option></select>' +
+            '<input type="text" id="pinvNewColOptions" placeholder="Dropdown options, comma separated (e.g. Yes, No, Pending)">' +
+            '<button id="pinvAddCol" class="btn btn-primary" style="font-size:.76rem;">＋ Add column</button>' +
+            '<button id="pinvColsReset" class="btn btn-secondary" style="font-size:.76rem;" title="Show every workbook column again">Show all</button>' +
+            '</div>' +
+            (state.colNotice ? '<p class="pinv-editnotice" style="margin:.5rem 0 0;">' + esc(state.colNotice) + '</p>' : '') +
+            '<p class="pinv-muted" style="font-size:.7rem;margin:.55rem 0 0;">Double-click any cell in the table to rewrite it — ' +
+            'dropdown columns and known-value columns (status, country, year…) offer a list, the rest accept free text. ' +
+            'An edit to a workbook column is marked <em>edited</em> and can be reset; it never rewrites the source file.</p>' +
+            '</div>';
     }
 
     function renderInventory(app) {
         var rows = viewRows();
         var s = stats(allRows());
         var auditActive = state.auditOnly ? state.auditOnly.length : 0;
+        var editedTotal = countEdits(loadEdits());
+        var colActive = Object.keys(state.columnFilters).filter(function (k) {
+            var f = state.columnFilters[k];
+            return !!(f && ((f.text && String(f.text).trim()) || (f.values && f.values.length)));
+        });
+        var colChips = colActive.map(function (k) {
+            var f = state.columnFilters[k];
+            var field = FIELDS.filter(function (x) { return x.key === k; })[0];
+            var label = field ? field.field : k;
+            var bits = [];
+            if (f.text && String(f.text).trim()) bits.push('“' + f.text.trim() + '”');
+            if (f.values && f.values.length) bits.push(f.values.length === 1 ? f.values[0] : f.values.length + ' values');
+            return '<button class="pinv-filter-chip" data-colfilter-clear="' + esc(k) + '" title="Remove this column filter">' +
+                esc(label) + ': ' + esc(bits.join(' + ')) + ' ✕</button>';
+        }).join('');
 
         var countryOpts = ['all'].concat(s.countryList).map(function (c) {
             return '<option value="' + esc(c) + '"' + (state.country === c ? ' selected' : '') + '>' +
@@ -2064,9 +2596,14 @@
         return '' +
             '<div class="pinv-toolbar pinv-toolbar-top">' +
             '<input type="search" id="pinvSearch" placeholder="Search every field — country, school, year, missing document…" value="' + esc(state.query) + '">' +
-            '<span class="pinv-toolbar-count">' + rows.length + ' of ' + s.total + ' rows' + (auditActive ? ' · filtered to ' + auditActive + ' flagged rows' : '') + '</span>' +
+            '<span class="pinv-toolbar-count">' + rows.length + ' of ' + s.total + ' rows' + (auditActive ? ' · filtered to ' + auditActive + ' flagged rows' : '') +
+            (colActive.length ? ' · ' + colActive.length + ' column filter' + (colActive.length === 1 ? '' : 's') : '') + '</span>' +
             (auditActive ? '<button id="pinvClearAudit" class="btn btn-secondary" style="font-size:.74rem;">✕ Clear the double-check filter</button>' : '') +
+            (colActive.length ? '<button id="pinvClearColFilters" class="btn btn-secondary" style="font-size:.74rem;">✕ Clear column filters</button>' : '') +
             '</div>' +
+            (colChips ? '<div class="pinv-filter-chips">' + colChips + '</div>' : '') +
+            (state.editNotice ? '<div class="pinv-editnotice">' + esc(state.editNotice) + '</div>' : '') +
+            renderColumnsManager() +
 
             '<div class="pinv-toolbar">' +
             '<label class="pinv-field"><span>Sort by</span><select id="pinvSort">' + sortOptionsHtml() + '</select></label>' +
@@ -2075,18 +2612,22 @@
             '<label class="pinv-field"><span>Country</span><select id="pinvCountry">' + countryOpts + '</select></label>' +
             '<label class="pinv-field"><span>Year</span><select id="pinvYear">' + yearOpts + '</select></label>' +
             '<label class="pinv-field"><span>Columns</span><select id="pinvColumns">' +
-            '<option value="key"' + (state.columns === 'key' ? ' selected' : '') + '>Key fields (recommended)</option>' +
-            '<option value="all"' + (state.columns === 'all' ? ' selected' : '') + '>All 16 fields</option>' +
+            '<option value="all"' + (state.columns === 'all' ? ' selected' : '') + '>All ' + FIELDS.length + ' fields (recommended)</option>' +
+            '<option value="key"' + (state.columns === 'key' ? ' selected' : '') + '>Key fields</option>' +
             '</select></label>' +
             '<label class="pinv-field"><span>Rows</span><select id="pinvPageSize">' +
             [25, 50, 100, 'all'].map(function (n) {
                 return '<option value="' + n + '"' + (String(state.pageSize) === String(n) ? ' selected' : '') + '>' + (n === 'all' ? 'All' : n) + '</option>';
             }).join('') +
             '</select></label>' +
+            '<button id="pinvColumnsBtn" class="btn btn-secondary' + (state.colManager ? ' active' : '') + '" style="font-size:.76rem;" ' +
+            'title="Show, hide, add or remove columns">▦ Columns</button>' +
+            '<button id="pinvFocus" class="btn btn-secondary" style="font-size:.76rem;" ' +
+            'title="Fill the window with the inventory — Esc exits">' + (state.focus ? '⛶ Exit full screen' : '⛶ Full screen') + '</button>' +
             '<label class="pinv-check"><input type="checkbox" id="pinvGaps"' + (state.gapsOnly ? ' checked' : '') + '> Only rows with missing information</label>' +
             '</div>' +
 
-            '<div class="section-title">🗂️ Inventory <span class="pinv-section-note">Tap a row to open every field for that project. Click any column heading to sort by it.</span></div>' +
+            '<div class="section-title">🗂️ Inventory <span class="pinv-section-note">Tap a row to open every field. Double-click any cell to rewrite it. Click a column heading to sort by it.</span></div>' +
 
             renderInventoryTable(rows) +
 
@@ -2096,9 +2637,10 @@
             '<button id="pinvExportXlsxFiltered" class="btn btn-secondary">⬇️ Excel — this view (' + rows.length + ')</button>' +
             '<button id="pinvExportCsv" class="btn btn-secondary">⬇️ CSV — this view</button>' +
             '<button id="pinvExportJson" class="btn btn-secondary">⬇️ JSON + findings</button>' +
+            (editedTotal ? '<button id="pinvResetEdits" class="btn btn-danger">↺ Reset my edits (' + editedTotal + ')</button>' : '') +
             '<span id="pinvExportStatus" class="pinv-muted" style="font-size:.74rem;align-self:center;"></span>' +
             '</div>' +
-            '<div class="pinv-muted" style="font-size:.72rem;margin-bottom:1.5rem;">The Excel file is written from the same rows and ' +
+            '<div class="pinv-muted pinv-focus-hide" style="font-size:.72rem;margin-bottom:1.5rem;">The Excel file is written from the same rows and ' +
             'columns the table uses, so the file and the screen cannot drift apart. “This view” exports exactly the rows left after ' +
             'your filters and in the order you sorted them. Every column heading is sortable; blanks always sink to the bottom.</div>' +
 
@@ -2114,7 +2656,7 @@
             { title: '1 · What it is', keys: ['id', 'year', 'name', 'category', 'status'] },
             { title: '2 · Who it reached', keys: ['country', 'location', 'org', 'instType', 'beneficiaries'] },
             { title: '3 · Description', keys: ['description'] },
-            { title: '4 · Money and dates', keys: ['donation', 'deliveryDate'] },
+            { title: '4 · Money, dates and duration', keys: ['donation', 'deliveryDate', 'duration'] },
             { title: '5 · Evidence', keys: ['documentation', 'fileLocation', 'missing'] }
         ];
 
@@ -2123,12 +2665,36 @@
                 '<div class="pinv-form">' + g.keys.map(function (key) {
                     var f = FIELDS.filter(function (x) { return x.key === key; })[0];
                     if (!f) return '';
+                    // Country is a dropdown: the brief's list, not a free-text box.
+                    if (f.key === 'country') {
+                        return '<label title="' + esc(f.what) + '">' + esc(f.field) +
+                            '<select data-field="country"><option value="">— not recorded —</option>' +
+                            countryChoices().map(function (c) {
+                                return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+                            }).join('') + '</select></label>';
+                    }
                     var long = LONG.indexOf(f.field) !== -1;
                     var tag = long ? 'textarea' : 'input';
                     return '<label class="' + (long ? 'pinv-wide' : '') + '" title="' + esc(f.what) + '">' + esc(f.field) +
                         '<' + tag + (long ? '' : ' type="text"') + ' data-field="' + f.key + '" placeholder="' + esc(f.what.slice(0, 64)) + '"></' + tag + '></label>';
                 }).join('') + '</div></div>';
         }).join('');
+
+        // Columns added in this app belong in the form too — a dropdown column
+        // offers its options, a text column is a text box.
+        var customHtml = COLUMNS.custom.length
+            ? '<div class="pinv-form-group"><div class="pinv-form-group-title">7 · Columns you added</div>' +
+              '<div class="pinv-form">' + COLUMNS.custom.map(function (f) {
+                  var label = '<label title="' + esc(f.what) + '">' + esc(f.field);
+                  if (f.type === 'select') {
+                      return label + '<select data-field="' + f.key + '"><option value="">—</option>' +
+                          (f.options || []).map(function (o) {
+                              return '<option value="' + esc(o) + '">' + esc(o) + '</option>';
+                          }).join('') + '</select></label>';
+                  }
+                  return label + '<input type="text" data-field="' + f.key + '" placeholder="' + esc(f.field) + '"></label>';
+              }).join('') + '</div></div>'
+            : '';
 
         return '<div class="card pinv-card" id="pinvAddCard" style="margin-bottom:1.5rem;">' +
             '<div class="pinv-card-title">➕ Add a project</div>' +
@@ -2141,9 +2707,10 @@
             '<div class="pinv-form">' +
             '<label class="pinv-wide" title="A photograph, logo or folder image that identifies the project. A C:\\ path is converted to a file:// URL.">' +
             'Picture (URL, or a C:\\ path to a photograph)' +
-            '<input type="text" id="pinvUserImage" placeholder="https://… or C:\\Users\\…\\CAMERA PROJECTS\\…\\photo.jpg"></label>' +
+            '<input type="text" id="pinvUserImage" placeholder="https://… or C:\\Users\\…\\photo.jpg"></label>' +
             '<div class="pinv-image-preview"><div class="pinv-muted">Preview</div><img id="pinvImagePreview" alt="" style="display:none;"><div id="pinvImageFallback" class="pinv-tile-fallback">A generated tile is used until a picture is given</div></div>' +
             '</div></div>' +
+            customHtml +
             '<div class="pinv-actions">' +
             '<button id="pinvSaveBtn" class="btn btn-primary">💾 Save project</button>' +
             '<button id="pinvCancelBtn" class="btn btn-secondary">Cancel</button>' +
@@ -2196,8 +2763,15 @@
             '<div class="section-title">📋 Field guide — what to record in each field</div>' +
             '<div class="card pinv-card" style="padding:0;overflow-x:auto;">' +
             '<table class="data-table" style="margin-bottom:0;"><thead><tr><th style="width:220px;">Field</th><th>What to record in each field</th></tr></thead>' +
-            '<tbody>' + FIELDS.map(function (f) {
+            '<tbody>' + BUILTIN_FIELDS.map(function (f) {
                 return '<tr><td><strong>' + esc(f.field) + '</strong></td><td>' + esc(f.what) + '</td></tr>';
+            }).join('') +
+            COLUMNS.custom.map(function (f) {
+                return '<tr><td><strong>' + esc(f.field) + '</strong>' +
+                    '<div class="pinv-muted" style="font-size:.66rem;">' + (f.locked ? 'part of the tracker' : 'added column') + '</div></td>' +
+                    '<td>' + esc(f.what) +
+                    (f.type === 'select' && (f.options || []).length ? '<div class="pinv-muted" style="font-size:.7rem;margin-top:.15rem;">Options: ' + esc(f.options.join(' · ')) + '</div>' : '') +
+                    '</td></tr>';
             }).join('') + '</tbody></table></div>' +
 
             '<div class="section-title">🔎 Sources used — and what each one could not give</div>' +
@@ -2210,26 +2784,39 @@
                     '</div>';
             }).join('') +
 
-            '<div class="section-title">🗂️ The local photo &amp; document archive</div>' +
+            '<div class="section-title">🗂️ Where the workbook says the files are</div>' +
             '<div class="card pinv-card">' +
-            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0 0 .7rem;">' +
-            'The recorded file locations point into the folder the sources were found in on one machine. ' +
-            'Point the app at your own copy and every recorded location resolves to it; leave it unset and the recorded ' +
-            'location is still shown as documentation, while rows fall back to a generated tile instead of a photograph ' +
-            'the app cannot reach.</p>' +
-            '<div class="pinv-actions" style="gap:.5rem;flex-wrap:wrap;margin:0;">' +
-            '<input type="text" id="pinvCameraRoot" spellcheck="false" aria-label="Archive folder" ' +
-            'placeholder="' + esc(RECORDED_CAMERA_ROOT) + '" value="' + esc(cameraRootSetting()) + '" ' +
-            'style="width:100%;box-sizing:border-box;padding:.6rem .8rem;border:1px solid var(--navy-border);border-radius:var(--radius-sm);' +
-            'background:var(--glass-bg);color:var(--text-primary);font-size:.8rem;margin-bottom:.6rem;font-family:\'JetBrains Mono\',monospace;">' +
-            '<div class="pinv-actions" style="gap:.5rem;flex-wrap:wrap;margin:0;">' +
-            '<button id="pinvSaveCameraRoot" class="btn btn-primary">Save folder</button>' +
-            '<button id="pinvClearCameraRoot" class="btn btn-secondary">Use recorded default</button>' +
+            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0;">' +
+            'The File location column is reproduced as the workbook records it — “SmallWorld PC” on six rows and blank ' +
+            'on the rest. The app shows that text as documentation; it is not a path it can open, and the export keeps ' +
+            'it exactly as written.</p>' +
             '</div>' +
-            '<p class="pinv-muted" style="font-size:.78rem;margin:.6rem 0 0;">Resolving to: <code>' + esc(CAMERA_ROOT) + '</code>' +
-            (cameraRootSetting() ? '' : ' — the recorded default, which may not be the folder on this PC.') + '</p>' +
-            '<p id="pinvCameraRootStatus" class="pinv-muted" style="font-size:.78rem;margin:.35rem 0 0;"></p>' +
+
+            '<div class="section-title">📎 Attachments</div>' +
+            '<div class="card pinv-card">' +
+            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0 0 .5rem;">' +
+            'Open any project row to attach evidence to it. Files are grouped by type: ' +
+            ATTACHMENT_TYPES.map(function (t) { return t.label; }).join(' · ') + '.</p>' +
+            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0;">' +
+            'Files up to 1 MB are copied into this app, so they work offline and in the browser preview. ' +
+            'Larger files are never copied: the desktop app keeps a link to the file on disk, and the browser ' +
+            'preview refuses them instead of pretending they were saved. Attachments are kept beside the ' +
+            'workbook row — the 17 columns and the .xlsx export stay exactly as recorded.</p>' +
             '</div>' +
+
+            '<div class="section-title">📊 Dashboard integration &amp; next steps</div>' +
+            '<div class="card pinv-card">' +
+            '<p class="pinv-muted" style="font-size:.8rem;line-height:1.6;margin:0 0 .5rem;">' +
+            'All 17 fields feed the Overview tab: projects per year, country, status and support category; completeness ' +
+            'for every field; reach figures; attachments and local edits; and the double-check findings. The same ' +
+            'corrected values are used by every export.</p>' +
+            '<ul class="pinv-list" style="padding-left:1.1rem;margin:0;">' +
+            '<li>Record the country for the 2020–2021 rows now coded <b>XX</b> — that segment means “not recorded”, not a country.</li>' +
+            '<li>Attach the evidence listed in Available documentation: agreements/MOUs, testimonies, thank-you letters, videos, receipts, reports and photographs.</li>' +
+            '<li>Give amounts and delivery dates as a single figure and date (not a free-text range) so a total can be trusted.</li>' +
+            '<li>Agree the detailed Support category list; the app groups the workbook wording exactly as recorded.</li>' +
+            '<li>When the team issues final Project IDs, enter them in the workbook and re-import — or use the ✎ editor on the Project ID column.</li>' +
+            '</ul></div>' +
 
             '<div class="section-title">📝 How this inventory was built</div>' +
             '<ul class="pinv-list" style="padding-left:1.1rem;">' +
@@ -2349,6 +2936,7 @@
         var host = document.getElementById('projectsBody');
         if (!host) return;
         if (!state._viewLoaded) { loadView(); state._viewLoaded = true; }
+        state._app = app;
 
         var body = '';
         if (state.tab === 'overview') body = renderOverview(app);
@@ -2357,7 +2945,27 @@
         else if (state.tab === 'live') body = renderLiveTab(app);
         else body = renderGuideTab();
 
-        host.innerHTML = renderTabs() + '<div class="pinv-panel">' + body + '</div>';
+        // Full-screen view: a fixed overlay that fills the window above the
+        // titlebar/sidebar, with its own always-visible exit control.
+        host.classList.toggle('pinv-focus', !!state.focus);
+        document.documentElement.classList.toggle('swa-inv-focus', !!state.focus);
+        flattenAncestors(host, !!state.focus);
+        var focusBar = state.focus
+            ? '<div class="pinv-focus-bar"><span>⛶ <b>Inventory</b> · full screen · scroll inside the grid · Esc exits</span>' +
+              '<button id="pinvFocusExit" class="btn btn-secondary" style="font-size:.72rem;">✕ Exit full screen</button></div>'
+            : '';
+        host.innerHTML = focusBar + renderTabs() + '<div class="pinv-panel">' + body + '</div>';
+
+        // Esc (or the browser leaving fullscreen) closes the focus view.
+        if (!state._fsBound) {
+            state._fsBound = true;
+            document.addEventListener('fullscreenchange', function () {
+                if (!document.fullscreenElement && state.focus) {
+                    state.focus = false;
+                    renderPage(state._app || app);
+                }
+            });
+        }
 
         wire(app);
         // Charts must be drawn after their canvases are in the DOM.
@@ -2370,12 +2978,98 @@
         }
     }
 
+    /* A `position: fixed` box is only fixed to the window while no ancestor has
+       a transform/filter — those make the ancestor the containing block. GSAP
+       leaves `transform: translate(0, 0)` on the page it animated, which is why
+       the full-screen view used to sit inset inside the page instead of filling
+       it. Marking the ancestors lets one CSS rule cancel that while focused. */
+    function flattenAncestors(host, on) {
+        var marked = document.querySelectorAll('.pinv-fs-flat');
+        Array.prototype.forEach.call(marked, function (n) { n.classList.remove('pinv-fs-flat'); });
+        if (!on || !host) return;
+        var el = host.parentElement;
+        while (el && el !== document.body) {
+            el.classList.add('pinv-fs-flat');
+            el = el.parentElement;
+        }
+    }
+
     /* ═══ Events ═════════════════════════════════════════════════════════ */
+
+    function setFocus(app, on) {
+        state.focus = !!on;
+        state._app = app;
+        renderPage(app);
+        // Also ask for real fullscreen where the browser allows it. The CSS
+        // overlay already fills the window, so a refusal leaves it usable.
+        try {
+            if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+                var p = document.documentElement.requestFullscreen();
+                if (p && p.catch) p.catch(function () { });
+            } else if (!on && document.fullscreenElement && document.exitFullscreen) {
+                var q = document.exitFullscreen();
+                if (q && q.catch) q.catch(function () { });
+            }
+        } catch (e) { /* the overlay is enough */ }
+    }
+
+    /* ── Inline column editing (every column, dropdown suggestions) ─────── */
+
+    function startColumnEdit(app, key) {
+        if (state.editColumn && state.editColumn !== key && Object.keys(state.editDraft).length) {
+            state.editNotice = 'Save or cancel the current column first.';
+            renderPage(app);
+            return;
+        }
+        state.editColumn = (state.editColumn === key) ? null : key;
+        state.editDraft = {};
+        state.editNotice = '';
+        state.colPop = null;
+        renderPage(app);
+    }
+
+    function cancelColumnEdit(app) {
+        state.editColumn = null;
+        state.editDraft = {};
+        state.editNotice = '';
+        renderPage(app);
+    }
+
+    /** Save the pending cell drafts for the column being edited (bulk mode). */
+    function saveColumnEdits(app) {
+        var key = state.editColumn;
+        if (!key) return;
+        var rows = allRows();
+        var byInternal = {};
+        rows.forEach(function (r) { byInternal[r.id] = r; });
+
+        var changes = [];
+        Object.keys(state.editDraft).forEach(function (rowId) {
+            var r = byInternal[rowId];
+            if (!r) return;
+            changes.push({ row: r, value: String(state.editDraft[rowId] == null ? '' : state.editDraft[rowId]).trim() });
+        });
+        if (!changes.length) {
+            state.editColumn = null;
+            state.editDraft = {};
+            state.editNotice = 'No changes to save.';
+            renderPage(app);
+            return;
+        }
+        applyEdits(app, key, changes, 'Column');
+    }
 
     function goToTab(app, tab) {
         state.tab = tab;
         state._tabChosen = true;
         state.page = 1;
+        state.editColumn = null;
+        state.editDraft = {};
+        state.editNotice = '';
+        state.cellEdit = null;
+        state.cellFreeText = false;
+        state.colManager = false;
+        state.colNotice = '';
         saveView();
         renderPage(app);
         var host = document.getElementById('projectsBody');
@@ -2391,6 +3085,13 @@
         state.country = 'all';
         state.year = 'all';
         state.status = 'all';
+        state.columnFilters = {};
+        state.colPop = null;
+        state.editColumn = null;
+        state.editDraft = {};
+        state.editNotice = '';
+        state.cellEdit = null;
+        state.cellFreeText = false;
         saveView();
         renderPage(app);
     }
@@ -2445,6 +3146,98 @@
             });
         });
 
+        /* Per-column filter dropdown: pick exact values, type a keyword, or both. */
+        host.querySelectorAll('[data-colfilter]').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var key = btn.getAttribute('data-colfilter');
+                if (state.colPop && state.colPop.key === key) { state.colPop = null; renderPage(app); return; }
+                var rect = btn.getBoundingClientRect();
+                var vw = window.innerWidth || 1200;
+                var vh = window.innerHeight || 800;
+                var left = Math.min(Math.max(8, rect.left), Math.max(8, vw - 328));
+                var top = rect.bottom + 6;
+                if (top + 380 > vh) top = Math.max(8, rect.top - 386);
+                state.colPop = { key: key, top: top, left: left };
+                renderPage(app);
+            });
+        });
+        var pop = host.querySelector('[data-colpop]');
+        if (pop) {
+            var popText = pop.querySelector('[data-colpop-text]');
+            if (popText) {
+                popText.addEventListener('input', function () {
+                    var q = String(popText.value || '').trim().toLowerCase();
+                    pop.querySelectorAll('.pinv-colpop-values label').forEach(function (label) {
+                        label.style.display = (!q || label.textContent.toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+                    });
+                });
+                popText.focus();
+                popText.setSelectionRange(popText.value.length, popText.value.length);
+            }
+            var applyColFilter = function () {
+                var key = pop.getAttribute('data-colpop');
+                var text = popText ? String(popText.value || '').trim() : '';
+                var picked = [];
+                pop.querySelectorAll('[data-colpop-value]:checked').forEach(function (b) {
+                    picked.push(b.getAttribute('data-colpop-value'));
+                });
+                if (text || picked.length) state.columnFilters[key] = { text: text, values: picked };
+                else delete state.columnFilters[key];
+                state.colPop = null;
+                state.page = 1;
+                renderPage(app);
+            };
+            pop.querySelectorAll('[data-colpop-apply]').forEach(function (b) { b.addEventListener('click', applyColFilter); });
+            pop.querySelectorAll('[data-colpop-edit]').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    var key = pop.getAttribute('data-colpop');
+                    state.colPop = null;
+                    startColumnEdit(app, key);
+                });
+            });
+            pop.querySelectorAll('[data-colpop-clear]').forEach(function (b) {
+                b.addEventListener('click', function () {
+                    delete state.columnFilters[pop.getAttribute('data-colpop')];
+                    state.colPop = null;
+                    state.page = 1;
+                    renderPage(app);
+                });
+            });
+            pop.querySelectorAll('[data-colpop-close]').forEach(function (b) {
+                b.addEventListener('click', function () { state.colPop = null; renderPage(app); });
+            });
+            pop.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); applyColFilter(); }
+                else if (e.key === 'Escape') { e.preventDefault(); state.colPop = null; renderPage(app); }
+            });
+        }
+        host.querySelectorAll('[data-colfilter-clear]').forEach(function (b) {
+            b.addEventListener('click', function () {
+                delete state.columnFilters[b.getAttribute('data-colfilter-clear')];
+                state.page = 1;
+                renderPage(app);
+            });
+        });
+        var clearCols = document.getElementById('pinvClearColFilters');
+        if (clearCols) clearCols.addEventListener('click', function () {
+            state.columnFilters = {};
+            state.colPop = null;
+            state.page = 1;
+            renderPage(app);
+        });
+        // Click anywhere outside the dropdown to close it (once, not per render).
+        if (!state._popBound) {
+            state._popBound = true;
+            document.addEventListener('mousedown', function (e) {
+                if (!state.colPop) return;
+                var el = e.target;
+                if (el && el.closest && (el.closest('.pinv-colpop') || el.closest('[data-colfilter]'))) return;
+                state.colPop = null;
+                renderPage(state._app);
+            });
+        }
+
         var bind = function (id, prop, isNumber) {
             var el = document.getElementById(id);
             if (!el) return;
@@ -2477,6 +3270,40 @@
             state.auditOnly = null; state.page = 1; renderPage(app);
         });
 
+        /* Inline edit mode: one column at a time, suggestions from the data. */
+        host.querySelectorAll('[data-editcol]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                startColumnEdit(app, b.getAttribute('data-editcol'));
+            });
+        });
+        host.querySelectorAll('.pinv-cellinput').forEach(function (inp) {
+            inp.addEventListener('click', function (e) { e.stopPropagation(); });
+            inp.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+            inp.addEventListener('input', function () {
+                state.editDraft[inp.getAttribute('data-cell-row')] = inp.value;
+                var count = document.getElementById('pinvEditCount');
+                if (count) {
+                    var n = Object.keys(state.editDraft).length;
+                    count.innerHTML = n ? '<b>' + n + '</b> unsaved change' + (n === 1 ? '' : 's') + '.' : '';
+                }
+            });
+        });
+        var editSave = document.getElementById('pinvEditSave');
+        if (editSave) editSave.addEventListener('click', function () { saveColumnEdits(app); });
+        var editCancel = document.getElementById('pinvEditCancel');
+        if (editCancel) editCancel.addEventListener('click', function () { cancelColumnEdit(app); });
+        var resetEdits = document.getElementById('pinvResetEdits');
+        if (resetEdits) resetEdits.addEventListener('click', function () {
+            if (typeof confirm === 'function' &&
+                !confirm('Remove every edit made in this app and go back to the workbook values?')) return;
+            var err = saveEdits({});
+            state.editColumn = null;
+            state.editDraft = {};
+            state.editNotice = err || 'All local edits were reset to the workbook values.';
+            renderPage(app);
+        });
+
         host.querySelectorAll('[data-page]').forEach(function (b) {
             b.addEventListener('click', function () {
                 var p = parseInt(b.getAttribute('data-page'), 10);
@@ -2490,9 +3317,158 @@
                 openRow(app, b.getAttribute('data-expand'));
             });
         });
+        /* Row click opens the row — unless it turns into a double-click on a
+           cell, which means “edit this cell”. The open is deferred a moment so
+           the second click can cancel it. */
         host.querySelectorAll('tr[data-row]').forEach(function (tr) {
-            tr.addEventListener('click', function () { openRow(app, tr.getAttribute('data-row')); });
+            tr.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('button, input, select, a, .pinv-editing-cell')) return;
+                if (state.cellEdit) return;      // typing in a cell, not opening a row
+                tr._openTimer = setTimeout(function () { openRow(app, tr.getAttribute('data-row')); }, 220);
+            });
+            tr.addEventListener('dblclick', function () { clearTimeout(tr._openTimer); });
         });
+
+        /* Double-click any cell to rewrite it in place (dropdown where it fits). */
+        host.querySelectorAll('td[data-cell-key]').forEach(function (td) {
+            td.addEventListener('dblclick', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                // The first click of the double-click queued "open this row" —
+                // cancel it, or the row would re-render under the new editor.
+                var tr = td.closest ? td.closest('tr') : null;
+                if (tr && tr._openTimer) clearTimeout(tr._openTimer);
+                startCellEdit(app, td.getAttribute('data-cell-row'), td.getAttribute('data-cell-key'));
+            });
+        });
+        host.querySelectorAll('[data-cell-commit]').forEach(function (el) {
+            el.addEventListener('click', function (e) { e.stopPropagation(); });
+            el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+            el.addEventListener('dblclick', function (e) { e.stopPropagation(); });
+            if (el.tagName === 'SELECT') {
+                el.addEventListener('change', function () {
+                    if (el.value === '__free') {
+                        state.cellFreeText = true;
+                        renderPage(app);
+                        var input = document.querySelector('.pinv-editing-cell .pinv-cellinput');
+                        if (input && input.focus) { input.focus(); if (input.select) input.select(); }
+                        return;
+                    }
+                    commitCellEdit(app, el.value);
+                });
+                return;
+            }
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); commitCellEdit(app, el.value); }
+                else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelCellEdit(app); }
+            });
+            el.addEventListener('blur', function () { commitCellEdit(app, el.value); });
+        });
+
+        /* Columns manager. */
+        var colsBtn = document.getElementById('pinvColumnsBtn');
+        if (colsBtn) colsBtn.addEventListener('click', function () {
+            state.colManager = !state.colManager;
+            state.colNotice = '';
+            renderPage(app);
+        });
+        host.querySelectorAll('[data-coltoggle]').forEach(function (box) {
+            box.addEventListener('change', function () {
+                var err = setColumnVisible(box.getAttribute('data-coltoggle'), box.checked);
+                state.colNotice = err || (box.checked ? 'Column shown.' : 'Column hidden — the data is kept.');
+                renderPage(app);
+            });
+        });
+        host.querySelectorAll('[data-coldel]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var key = b.getAttribute('data-coldel');
+                var col = COLUMNS.custom.filter(function (f) { return f.key === key; })[0];
+                if (!col) return;
+                if (typeof confirm === 'function' &&
+                    !confirm('Delete the column “' + col.field + '” and every value typed into it?')) return;
+                var err = deleteColumn(key);
+                state.colNotice = err || ('Column “' + col.field + '” deleted.');
+                renderPage(app);
+            });
+        });
+        var addColBtn = document.getElementById('pinvAddCol');
+        if (addColBtn) addColBtn.addEventListener('click', function () {
+            var nameEl = document.getElementById('pinvNewColName');
+            var typeEl = document.getElementById('pinvNewColType');
+            var optEl = document.getElementById('pinvNewColOptions');
+            var options = optEl ? String(optEl.value || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+            var err = addColumn({
+                field: nameEl ? nameEl.value : '',
+                type: typeEl && typeEl.value === 'select' ? 'select' : 'text',
+                options: options
+            });
+            if (!err) {
+                var added = COLUMNS.custom[COLUMNS.custom.length - 1];
+                state.colNotice = 'Column “' + (added ? added.field : 'new') + '” added — double-click a cell to fill it.';
+                if (app.logBuildEvent) app.logBuildEvent('project-inventory-column', 'Added column ' + (added ? added.field : ''));
+            } else {
+                state.colNotice = err;
+            }
+            renderPage(app);
+        });
+        var colsReset = document.getElementById('pinvColsReset');
+        if (colsReset) colsReset.addEventListener('click', function () {
+            var err = showAllColumns();
+            state.colNotice = err || 'Every column is shown again.';
+            renderPage(app);
+        });
+
+        /* Attachments: choose a type, pick files, see them grouped by type. */
+        host.querySelectorAll('[data-attach-input]').forEach(function (input) {
+            input.addEventListener('change', function () {
+                var id = input.getAttribute('data-attach-input');
+                var panel = input.closest ? input.closest('.pinv-attach') : null;
+                var sel = panel ? panel.querySelector('select[data-attach-type]') : null;
+                var type = sel ? sel.value : 'auto';
+                var files = input.files;
+                if (!files || !files.length) return;
+                addAttachments(id, type, files).then(function (res) {
+                    var bits = [];
+                    if (res.added) bits.push(res.added + ' attachment' + (res.added === 1 ? '' : 's') + ' added');
+                    if (!res.added && !res.skipped.length && !res.error) bits.push('No files were added');
+                    if (res.skipped.length) {
+                        bits.push('Skipped ' + res.skipped.length + ': ' + res.skipped.map(function (s) {
+                            return s.name + ' — ' + s.reason;
+                        }).join('; '));
+                    }
+                    if (res.error) bits.push(res.error);
+                    state.attachNotice = { id: id, text: bits.join('. '), error: !!res.error || res.skipped.length > 0 };
+                    if (app.logBuildEvent) app.logBuildEvent('project-attachment-add',
+                        id + ': ' + res.added + ' added, ' + res.skipped.length + ' skipped');
+                    renderPage(app);
+                });
+            });
+        });
+        host.querySelectorAll('[data-attach-del]').forEach(function (b) {
+            b.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var id = b.getAttribute('data-attach-for');
+                var err = removeAttachment(id, b.getAttribute('data-attach-del'));
+                state.attachNotice = { id: id, text: err || 'Attachment removed.', error: !!err };
+                renderPage(app);
+            });
+        });
+
+        /* Full-screen inventory: fill the window, leave with the button or Esc. */
+        var focusBtn = document.getElementById('pinvFocus');
+        if (focusBtn) focusBtn.addEventListener('click', function () { setFocus(app, !state.focus); });
+        var focusExit = document.getElementById('pinvFocusExit');
+        if (focusExit) focusExit.addEventListener('click', function () { setFocus(app, false); });
+        if (state._escHandler) document.removeEventListener('keydown', state._escHandler);
+        state._escHandler = function (e) {
+            if (e.key !== 'Escape') return;
+            if (state.cellEdit) cancelCellEdit(state._app || app);
+            else if (state.focus) setFocus(state._app || app, false);
+            else if (state.editColumn) cancelColumnEdit(state._app || app);
+        };
+        document.addEventListener('keydown', state._escHandler);
 
         host.querySelectorAll('[data-audit]').forEach(function (b) {
             b.addEventListener('click', function () {
@@ -2535,9 +3511,15 @@
 
         var reset = document.getElementById('pinvResetBtn');
         if (reset) reset.addEventListener('click', function () {
+            // Remove the rows AND the attachments that belonged to them — an
+            // attachment with no row would be unreachable data. Built-in rows
+            // keep theirs.
+            loadUserProjects().forEach(function (r) {
+                if (r && r.values && r.values.id) removeAttachmentsFor(r.values.id);
+            });
             saveUserProjects([]);
             renderPage(app);
-            if (app.logBuildEvent) app.logBuildEvent('project-inventory-reset', 'Removed user-added project rows');
+            if (app.logBuildEvent) app.logBuildEvent('project-inventory-reset', 'Removed user-added project rows and their attachments');
         });
 
         host.querySelectorAll('.pinv-edit').forEach(function (b) {
@@ -2547,7 +3529,10 @@
             b.addEventListener('click', function (e) {
                 e.stopPropagation();
                 var list = loadUserProjects();
-                list.splice(parseInt(b.getAttribute('data-user'), 10), 1);
+                var idx = parseInt(b.getAttribute('data-user'), 10);
+                var removed = list[idx];
+                if (removed && removed.values && removed.values.id) removeAttachmentsFor(removed.values.id);
+                list.splice(idx, 1);
                 saveUserProjects(list);
                 renderPage(app);
             });
@@ -2588,32 +3573,6 @@
                 return q(f.field) + ',' + q(f.what);
             }).join('\n');
             downloadBlob(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), 'SmallWorld-Project-Field-Guide.csv');
-        });
-
-        /* Point the app at this machine's copy of the source archive. The
-           recorded paths resolve when the module loads, so a change is applied
-           by reloading rather than by half-updating the already-built rows. */
-        var camSave = document.getElementById('pinvSaveCameraRoot');
-        if (camSave) camSave.addEventListener('click', function () {
-            var input = document.getElementById('pinvCameraRoot');
-            var status = document.getElementById('pinvCameraRootStatus');
-            var value = input ? String(input.value || '').trim() : '';
-            try {
-                if (value) localStorage.setItem(CAMERA_ROOT_KEY, value);
-                else localStorage.removeItem(CAMERA_ROOT_KEY);
-            } catch (e) {
-                if (status) status.textContent = 'Could not save the folder: ' + (e && e.message ? e.message : e);
-                return;
-            }
-            if (status) status.textContent = 'Saved — re-resolving the recorded locations…';
-            if (typeof location !== 'undefined' && location.reload) location.reload();
-        });
-        var camClear = document.getElementById('pinvClearCameraRoot');
-        if (camClear) camClear.addEventListener('click', function () {
-            var input = document.getElementById('pinvCameraRoot');
-            if (input) input.value = '';
-            try { localStorage.removeItem(CAMERA_ROOT_KEY); } catch (e) { }
-            if (typeof location !== 'undefined' && location.reload) location.reload();
         });
 
         var loadSnap = document.getElementById('pinvLoadSnapshot');
@@ -2675,6 +3634,23 @@
         if (status) status.textContent = 'Editing #' + (index + 1) + ' — save to apply.';
     }
 
+    /** Next free client ID for a country and year: CC + 01.. + YY.
+     *  The number restarts for each country-year and skips anything already in
+     *  use, so hand-typed and generated IDs cannot collide. */
+    function nextClientId(country, yearValue) {
+        var code = countryCodeFor(country);
+        var m = String(yearValue || '').match(/(\d{4})/);
+        var yy = (m ? m[1] : String(new Date().getFullYear())).slice(-2);
+        var used = {};
+        allRows().forEach(function (r) {
+            var id = String(r.values.id || '');
+            if (id.length === 6 && id.slice(0, 2) === code && id.slice(-2) === yy) used[id.slice(2, 4)] = 1;
+        });
+        var n = 1;
+        while (used[String(n).padStart(2, '0')]) n++;
+        return code + String(n).padStart(2, '0') + yy;
+    }
+
     function saveProject(app) {
         var status = document.getElementById('pinvAddStatus');
         var values = {};
@@ -2702,16 +3678,13 @@
                     (clash.values.name || 'existing row') + '). Use a different ID or leave it blank.';
                 return;
             }
-            if (!/^SW-[A-Za-z0-9-]+$/.test(values.id)) {
-                if (status) status.textContent = 'Project IDs follow the pattern SW-YEAR-NNN (for example SW-2026-004); ' +
-                    'leave it blank to have one generated.';
+            if (!/^[A-Z]{2}\d{4}$/.test(values.id)) {
+                if (status) status.textContent = 'Project IDs look like UK0126 — a 2-letter country code, a 2-digit ' +
+                    'number (01, 02, 03, 04…) and the last two digits of the year; leave it blank to have one generated.';
                 return;
             }
         } else {
-            var n = 1;
-            var existing = {};
-            allRows().forEach(function (r) { existing[r.values.id] = 1; });
-            do { values.id = 'SW-USER-' + String(n).padStart(3, '0'); n++; } while (existing[values.id]);
+            values.id = nextClientId(values.country, values.year);
         }
 
         FIELDS.forEach(function (f) { if (!values[f.key]) values[f.key] = '—'; });
@@ -2751,6 +3724,9 @@
         SOURCES: SOURCES,
         METHOD_NOTES: METHOD_NOTES,
         DATA_METHODS: DATA_METHODS,
+        ATTACHMENT_TYPES: ATTACHMENT_TYPES,
+        ATTACH_EMBED_LIMIT: ATTACH_EMBED_LIMIT,
+        attachmentsFor: attachmentsFor,
         buildXlsx: buildXlsx,
         sheetName: 'Project Inventory',
         /* Read-only accessors so the inventory's own numbers can be checked by
@@ -2758,7 +3734,35 @@
         rows: function () { return allRows(); },
         stats: function () { return stats(allRows()); },
         analytics: function () { return analytics(allRows()); },
-        audit: function () { return auditRows(allRows()); }
+        audit: function () { return auditRows(allRows()); },
+        /* Column model: which columns are shown, plus the added ones. Also the
+           write path, so the tests can prove add / hide / delete / restore
+           without a browser. Every call returns '' on success or the reason. */
+        columns: function () {
+            return {
+                visible: FIELDS.map(function (f) { return f.key; }),
+                hidden: COLUMNS.hidden.slice(),
+                custom: COLUMNS.custom.map(function (f) {
+                    return { key: f.key, field: f.field, type: f.type, options: (f.options || []).slice(), locked: !!f.locked };
+                })
+            };
+        },
+        addColumn: function (def) { return addColumn(def); },
+        setColumnVisible: function (key, visible) { return setColumnVisible(key, visible); },
+        deleteColumn: function (key) { return deleteColumn(key); },
+        showAllColumns: function () { return showAllColumns(); },
+        cellOptions: function (key) {
+            var f = FIELDS.filter(function (x) { return x.key === key; })[0];
+            return f ? cellOptions(f) : [];
+        },
+        /* The same CSV the Download button produces, so the file on disk and the
+           exported file can never disagree (generate-project-inventory.js). */
+        buildCsv: function () { return toCsv(FIELDS, rowsToArrays(allRows())); },
+        /* Client IDs and the country list (checked by test_project_inventory.js). */
+        COUNTRY_OPTIONS: COUNTRY_OPTIONS.slice(),
+        countryCodeFor: countryCodeFor,
+        countryChoices: countryChoices,
+        nextClientId: nextClientId
     };
 
     /* Node path (generate-project-inventory.js writes the workbook file). */
@@ -2771,6 +3775,11 @@
         var P = InstagramAnalytics.prototype;
 
         P.projectInventoryFields = function () { return FIELDS; };
+        P.projectInventoryColumns = function () { return api.columns(); };
+        P.addProjectInventoryColumn = function (def) { return addColumn(def); };
+        P.setProjectInventoryColumn = function (key, visible) { return setColumnVisible(key, visible); };
+        P.deleteProjectInventoryColumn = function (key) { return deleteColumn(key); };
+        P.showAllProjectInventoryColumns = function () { return showAllColumns(); };
         P.projectInventoryRows = function () { return ALL_PROJECTS; };
         P.projectInventorySources = function () { return SOURCES; };
         P.projectInventoryDataMethods = function () { return DATA_METHODS; };
@@ -2792,6 +3801,29 @@
         };
 
         P.renderProjectInventoryPage = function () { renderPage(this); };
+
+        // Called by ui.js navigateTo when leaving the Projects page, so the
+        // inventory's full-screen overlay cannot hide the titlebar elsewhere.
+        P.projectInventoryBlur = function () {
+            state.focus = false;
+            state.colPop = null;
+            state.editColumn = null;
+            state.editDraft = {};
+            state.editNotice = '';
+            state.cellEdit = null;
+            state.cellFreeText = false;
+            state.colManager = false;
+            document.documentElement.classList.remove('swa-inv-focus');
+            flattenAncestors(null, false);
+            var host = document.getElementById('projectsBody');
+            if (host) { host.classList.remove('pinv-focus'); host.innerHTML = ''; }
+            if (document.fullscreenElement && document.exitFullscreen) {
+                try {
+                    var p = document.exitFullscreen();
+                    if (p && p.catch) p.catch(function () { });
+                } catch (e) { /* already out */ }
+            }
+        };
 
         P.exportProjectInventoryExcel = function () { exportXlsx(this, allRows(), false); };
 

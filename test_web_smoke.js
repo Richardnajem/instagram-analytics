@@ -139,7 +139,137 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
       };
     } catch (e) { importTest = { error: String(e && e.message || e) }; }
 
-    report = Object.assign(pageState, { scanTest, importTest });
+    // 3) The Projects inventory: open it, add a column, rewrite a cell, all in
+    //    the browser a tester uses.
+    const projectsTest = { opened: false };
+    try {
+      w.confirm = () => true;
+      app.navigateTo('projects');
+      await wait(1200);
+      app.projectInventoryTab('inventory');
+      app.renderProjectInventoryPage();
+      await wait(700);
+      const headText = () => Array.prototype.map.call(d.querySelectorAll('#projectsBody th'), t => t.textContent).join(' | ');
+      const bodyText = () => (d.getElementById('projectsBody') || {}).textContent || '';
+
+      projectsTest.opened = !!d.getElementById('pinvColumnsBtn');
+      projectsTest.trackerColumns = headText().indexOf('Beneficiary / Institution Type') !== -1 &&
+          headText().indexOf('Tangible / Non-Tangible') !== -1;
+      const tangCell = d.querySelector('.pinv-table tbody tr[data-row] td[data-cell-key="tangibility"]');
+      if (tangCell) {
+        tangCell.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+        await wait(350);
+        const tangSelect = d.querySelector('.pinv-editing-cell select');
+        projectsTest.tangibilityDropdown = !!tangSelect && tangSelect.options.length === 4;
+        if (tangSelect) {
+          // Committing proves the app-column value survives the row rebuild.
+          tangSelect.value = 'Tangible';
+          tangSelect.dispatchEvent(new w.Event('change', { bubbles: true }));
+          await wait(700);
+          projectsTest.tangibilitySaved =
+              /Tangible/.test(bodyText()) &&
+              /tangibility/.test(w.localStorage.getItem('swaProjectInventoryEdits') || '');
+        }
+        d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await wait(300);
+      }
+
+      // Country is a dropdown of the programme's countries, not a text box.
+      app.projectInventoryTab('add');
+      await wait(500);
+      const countrySel = d.querySelector('#projectsBody select[data-field="country"]');
+      projectsTest.countryOptions = countrySel ? countrySel.options.length : 0;
+      projectsTest.countryHasUK = !!countrySel && Array.prototype.some.call(countrySel.options, (o) => o.value === 'United Kingdom');
+      projectsTest.countryHasAustralia = !!countrySel && Array.prototype.some.call(countrySel.options, (o) => o.value === 'Australia');
+      app.projectInventoryTab('inventory');
+      app.renderProjectInventoryPage();
+      await wait(600);
+
+      // Sticky picture + ID must sit side by side after scrolling sideways, not
+      // overlap (the picture used to slide over the ID).
+      const wrap = d.querySelector('.pinv-table-wrap');
+      const artCell = d.querySelector('.pinv-table tbody tr[data-row] td.pinv-art');
+      const idCell = d.querySelector('.pinv-table tbody tr[data-row] td.pinv-idcol');
+      if (wrap && artCell && idCell) {
+        wrap.scrollLeft = 600;
+        await wait(300);
+        const artRect = artCell.getBoundingClientRect();
+        const idRect = idCell.getBoundingClientRect();
+        projectsTest.idSticky = w.getComputedStyle(idCell).position === 'sticky';
+        projectsTest.gap = Math.round(idRect.left - artRect.right);
+        projectsTest.overlap = idRect.left < artRect.right - 1;
+        projectsTest.firstId = idCell.textContent.trim();
+        wrap.scrollLeft = 0;
+        await wait(200);
+      }
+
+      // The expanded detail row must fit its sticky block too.
+      const expandBtn = d.querySelector('.pinv-table tbody tr[data-row] .pinv-expand');
+      if (expandBtn) {
+        expandBtn.click();
+        await wait(450);
+        const detailArt = d.querySelector('.pinv-detail-row td.pinv-detail-art');
+        const detailImg = detailArt ? detailArt.querySelector('img') : null;
+        if (detailArt && detailImg) {
+          const artRect = detailArt.getBoundingClientRect();
+          const imgRect = detailImg.getBoundingClientRect();
+          projectsTest.detailFits = imgRect.width <= artRect.width && imgRect.right <= artRect.right + 1;
+          projectsTest.detailGap = Math.round(artRect.width - imgRect.width);
+        }
+        const collapse = d.querySelector('.pinv-table tbody tr[data-row] .pinv-expand');
+        if (collapse) { collapse.click(); await wait(350); }
+      }
+
+      const colsBtn = d.getElementById('pinvColumnsBtn');
+      if (colsBtn) { colsBtn.click(); await wait(300); }
+      projectsTest.managerOpen = !!d.getElementById('pinvColManager');
+
+      const nameEl = d.getElementById('pinvNewColName');
+      if (nameEl) {
+        nameEl.value = 'Browser check';
+        const addBtn = d.getElementById('pinvAddCol');
+        if (addBtn) addBtn.click();
+        await wait(500);
+      }
+      projectsTest.addedColumn = /Browser check/.test(headText());
+      projectsTest.columnStored = /Browser check/.test(w.localStorage.getItem('swaProjectInventoryColumns') || '');
+
+      const cell = d.querySelector('.pinv-table tbody tr[data-row] td[data-cell-key="name"]');
+      if (cell) {
+        cell.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+        await wait(350);
+        const input = d.querySelector('.pinv-editing-cell .pinv-cellinput');
+        projectsTest.cellEditor = !!input;
+        if (input) {
+          input.value = 'Edited in the browser preview';
+          input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          await wait(600);
+          projectsTest.cellEdited = /Edited in the browser preview/.test(bodyText());
+        }
+      }
+      projectsTest.editStored = /Edited in the browser preview/.test(w.localStorage.getItem('swaProjectInventoryEdits') || '');
+
+      const statusCell = d.querySelector('.pinv-table tbody tr[data-row] td[data-cell-key="status"]');
+      if (statusCell) {
+        statusCell.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+        await wait(300);
+        projectsTest.statusDropdown = !!d.querySelector('.pinv-editing-cell select');
+        d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await wait(250);
+      }
+
+      // Editing closes nothing, but re-open the manager if it is shut so the
+      // delete path is exercised exactly as a visitor would find it.
+      if (!d.getElementById('pinvColManager')) {
+        const reopen = d.getElementById('pinvColumnsBtn');
+        if (reopen) { reopen.click(); await wait(300); }
+      }
+      const delBtn = d.querySelector('[data-coldel]');
+      if (delBtn) { delBtn.click(); await wait(500); }
+      projectsTest.columnRemoved = !/Browser check/.test(headText());
+    } catch (e) { projectsTest.error = String((e && e.message) || e); }
+
+    report = Object.assign(pageState, { scanTest, importTest, projectsTest });
   } catch (e) {
     report = { harnessError: String((e && e.stack) || e) };
   }
@@ -358,6 +488,34 @@ function extractReport(html) {
     check('a file with no profile header leaves follower metrics unknown, not guessed',
         report.importTest.followerMetricsAfter === '—',
         'engagement rate after the header-less import: ' + report.importTest.followerMetricsAfter);
+
+    console.log('\n── The Projects inventory, editable in the preview ──────');
+    const projects = report.projectsTest || {};
+    check('the inventory opens in the browser', projects.opened === true, projects.error || '');
+    check('the Columns manager opens', projects.managerOpen === true);
+    check('a column can be added and appears in the table', projects.addedColumn === true);
+    check('the added column is saved in browser storage', projects.columnStored === true);
+    check('double-clicking a cell opens an editor', projects.cellEditor === true);
+    check('typing a value rewrites that cell', projects.cellEdited === true);
+    check('the edit is saved, not just drawn', projects.editStored === true);
+    check('a known-value column edits with a dropdown', projects.statusDropdown === true);
+    check('the added column can be removed again', projects.columnRemoved === true);
+    check('the two classification columns are in the table',
+        projects.trackerColumns === true);
+    check('Tangible / Non-Tangible edits with its two-value dropdown',
+        projects.tangibilityDropdown === true);
+    check('a classification value is saved and survives the re-render',
+        projects.tangibilitySaved === true);
+    check('the country field offers the programme countries',
+        projects.countryHasUK === true && projects.countryHasAustralia === true,
+        'options in the dropdown: ' + projects.countryOptions);
+    check('the picture and the ID sit side by side when the table is scrolled',
+        projects.idSticky === true && projects.overlap === false,
+        'ID column position ' + projects.idSticky + ', gap ' + projects.gap + 'px');
+    check('the ID column shows the client-ID format (CC + NN + YY)',
+        /^[A-Z]{2}\d{4}$/.test(projects.firstId || ''), projects.firstId);
+    check('the expanded row’s picture fits inside its sticky block',
+        projects.detailFits === true, 'spare width ' + projects.detailGap + 'px');
 
     console.log('\n───────────────────────────────────────────────────────');
     if (failures === 0) {

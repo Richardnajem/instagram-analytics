@@ -347,11 +347,38 @@ function createWindow() {
   ipcMain.removeAllListeners('window-minimize');
   ipcMain.removeAllListeners('window-maximize');
   ipcMain.removeAllListeners('window-close');
+  ipcMain.removeAllListeners('window-fullscreen');
+  ipcMain.removeAllListeners('window-fullscreen-state');
   ipcMain.removeAllListeners('scrape-instagram-profile');
   ipcMain.removeAllListeners('get-saved-scan');
   ipcMain.on('window-minimize', () => win.minimize());
   ipcMain.on('window-maximize', () => win.isMaximized() ? win.unmaximize() : win.maximize());
   ipcMain.on('window-close', () => win.close());
+
+  /* Fullscreen: F11 / the titlebar button toggles it, Esc leaves it. The
+     renderer is told the real state (from the window, not a local flag), so
+     the titlebar icon cannot disagree with the window. */
+  const sendFullscreenState = (on) => {
+    try {
+      if (!win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.send('fullscreen-changed', !!on);
+      }
+    } catch (e) { /* window closing */ }
+  };
+  ipcMain.on('window-fullscreen', () => win.setFullScreen(!win.isFullScreen()));
+  ipcMain.on('window-fullscreen-state', () => sendFullscreenState(win.isFullScreen()));
+  win.on('enter-full-screen', () => sendFullscreenState(true));
+  win.on('leave-full-screen', () => sendFullscreenState(false));
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    if (input.key === 'F11') {
+      event.preventDefault();
+      win.setFullScreen(!win.isFullScreen());
+    } else if (input.key === 'Escape' && win.isFullScreen()) {
+      event.preventDefault();
+      win.setFullScreen(false);
+    }
+  });
 
   /* ── The last scan this machine collected, for any account ──────────────
      A scan is written to disk (scan-cache/<username>.json) as it walks, and

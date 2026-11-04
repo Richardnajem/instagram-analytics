@@ -39,7 +39,7 @@ modules call, it does not need to be in that list, but a missing one is surfaced
 | Charts (Chart.js) | `charts.js` |
 | DOM rendering: pages, post grid, dashboard, profile header, **data-freshness strip** | `ui.js` |
 | Per-post analysis (the "Comprehensive Analysis" panel) | `post-analysis.js` |
-| Projects tab: field guide, inventory, analytics, data double-check, exports | `project-inventory.js` |
+| Projects tab: field guide, inventory, **column add/hide/delete**, cell editing, attachments, analytics, data double-check, exports | `project-inventory.js` |
 | localStorage persistence, history, build log, unfollow history, **scan snapshots** | `storage.js` |
 | Instagram login / session / unfollow | `instagram-auth.js` |
 | Intro overlay, entrance/scroll animations, particles | `animations.js` |
@@ -76,6 +76,29 @@ modules call, it does not need to be in that list, but a missing one is surfaced
    it is showing live or saved data and **the age shown is the age of the data**, 
    not of the file write (`_scanFreshness()` / `renderScanFreshness()` in `ui.js`,
    guarded by `test_scan_snapshot.js`).
+7. **Attachments never rewrite the workbook.** Project attachments live in their
+   own store (`swaProjectAttachments`) keyed by Project ID, so the 17 inventory
+   columns and the .xlsx export stay exactly as recorded. A file ≤ 1 MB is copied
+   in; a larger file is linked from disk in the desktop app and **refused** in the
+   browser preview, never silently dropped or uploaded (`project-inventory.js`).
+   Corrections typed into the table are local overrides (`swaProjectInventoryEdits`)
+   keyed by the original workbook Project ID: they are marked *edited*, visible in
+   the exports, and resettable — the workbook data is never rewritten.
+   Any cell can be rewritten (double-click) and any column can be shown, hidden,
+   added or deleted from the Columns manager (`swaProjectInventoryColumns`).
+   Project IDs are `CC + NN + YY` (`UK0125` = first UK project of 2025), numbered
+   per country-year; the country dropdown list and the codes behind those IDs are
+   `COUNTRY_OPTIONS` / `COUNTRY_CODE` in `project-inventory.js`, and stored keys
+   from the older `CC-TYPE-YEAR` and `SW-…` IDs are migrated once on load.
+   Two extra classification columns ship with the tracker (`TRACKER_COLUMNS`,
+   seeded by `ensureTrackerColumns`): Beneficiary / Institution Type and
+   Tangible / Non-Tangible. They are app columns — not workbook data — with
+   dropdown options, blank until classified, and `locked`: hideable but not
+   deletable. Their values persist in the same edits map as other app columns, so
+   `objectRows` must seed every `COLUMNS.custom` key or a saved value is dropped.
+   Workbook columns are hidden, never deleted — hiding one keeps its values, the
+   Projects arrays keep their 17-column mapping (`BUILTIN_FIELDS`), and only a
+   column added in the app can be deleted (with the values typed into it).
 
 ## Error logging
 
@@ -120,3 +143,13 @@ npm run gen:inventory # rewrites SmallWorld-Project-Inventory.xlsx from project-
 still contains the old `Math.random`-based metric code. It is not loaded by the
 app and is untracked, but running it would show fabricated values. Do not use it;
 delete it when convenient.
+
+## Release rule (mandatory)
+
+1. **Verify** - `npm test`, plus `npm run test:boot` when the Electron window changed.
+2. **Bump + EXE in one step** - `npm run dist` (patch), `dist:minor` or `dist:major`.
+   Each runs `npm version <kind> --no-git-tag-version` then `electron-builder`.
+3. **Push** - commit the code with the bumped `package.json`, then `git push origin main`.
+
+`web/` is generated output: regenerate with `npm run build:web` and deploy it, never
+hand-edit the copy.

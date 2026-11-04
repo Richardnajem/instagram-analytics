@@ -219,20 +219,60 @@ Five sub-tabs, so the working part is never buried in the reference part:
 
 - **Overview & analytics** — the identification picture (the account's own
   profile photo, falling back to the app logo), KPI tiles, charts of projects per
-  year / per country / by status / by support type, how the 16 fields are
+  year / per country / by status / by support type, how the 17 fields are
   covered, and what the inventory deliberately does *not* total.
-- **Inventory** — every project as a compact table. Key fields by default, all
-  16 on demand; any column heading sorts; filters for status, country, year and
-  gaps; 25/50/100/all rows per page; click a row to open every field with the
-  guide text beside it.
+- **Inventory** — every project as a table of all 17 workbook columns from
+  Project ID to Duration of project (a *Key fields* preset is available); any
+  column heading sorts; **each column has its own dropdown** for filtering by a
+  specific value or a keyword; filters for status, country, year and gaps;
+  25/50/100/all rows per page; **Full screen** fills the window (Esc exits);
+  click a row to open every field with the guide text beside it and an
+  **attachments** panel grouped by type (agreement, testimonies, thank-you
+  letters, videos, receipts, reports, photos, other). Files up to 1 MB are
+  copied into the app; larger files are linked from disk in the desktop app.
+  **Double-click any cell to rewrite it** — known-value columns (status, country,
+  year, institution type, support category) and dropdown columns offer a list,
+  free-text columns accept anything; Enter saves, Esc cancels. Every column also
+  has a **✎ bulk editor** with suggestions drawn from the existing values.
+  Corrections are stored as local overrides, marked *edited*, and one button
+  resets them to the workbook values.
+- **Columns** — the **▦ Columns** button shows, hides, adds and removes columns.
+  Workbook columns are *hidden, never deleted* — the recorded values stay intact
+  and can be shown again; an export carries exactly the columns on screen, as it
+  always has. A column you add is text or a dropdown with your own options,
+  appears in the table, the add-project form and every export, and can be deleted
+  together with the values typed into it. The setup is remembered and works the
+  same in the browser preview.
 - **Add a project** — a grouped form with a picture preview. A duplicate Project
   ID is refused and the ID pattern is checked, so a hand-added row cannot corrupt
   the inventory.
 - **Live Instagram data** — the most recent saved scan first (with its age,
   coverage and whether the walk reached the first post), the live profile and
   post cards, and the researched list of ways to get accurate data.
-- **Field guide & sources** — the 16-field guide, the sources and what each one
-  could not give, and how the inventory was built.
+- **Field guide & sources** — the 17-field guide, the sources and what each one
+  could not give, how the inventory was built, and a dashboard-integration /
+  next-steps card.
+
+Project IDs follow the requested client-ID format: two-letter country code, a
+  2-digit number for the project’s place in that country for the year (01, 02,
+  03, 04…), then the last two digits of the year — `UK0125` is the first UK
+  project of 2025, `UK0225` the second. `XX` stands in where the workbook records
+  no country. The number restarts for each country-year and a project added in
+  the app takes the next free one. Edits and attachments stored under the older
+  `CC-TYPE-YEAR` and `SW-…` IDs are migrated automatically on load, so a rename
+  cannot orphan evidence.
+
+The Country field is a dropdown of the programme’s countries (the map from the
+  brief), plus any value already recorded that is not on the list — one country,
+  one spelling, and nothing in the existing data silently disappears.
+
+Two classification columns sit after the workbook’s 17, kept separate rather
+  than folded into Institution type: **Beneficiary / Institution Type** (physical
+  institution, programme, initiative, individual, group, community) and
+  **Tangible / Non-Tangible** (a physical entity or measurable support, versus a
+  developmental/indirect benefit). Both are dropdowns in the table, the add form
+  and the exports; they start blank — classification is a judgement, never
+  inferred — and are locked, so they can be hidden but not deleted.
 
 ### Double-check
 
@@ -388,6 +428,10 @@ All data is stored locally in your browser using:
 - `swaLastSearch` - The most recent result the app loaded
 - `swaScanLibrary` - One saved scan per account (posts + header + coverage + date); merges instead of replacing
 - `swaProjectInventoryUser` - Projects you added in the Projects tab
+- `swaProjectAttachments` - Attachments per workbook row. Small files (≤ 1 MB) are copied in as data URLs; larger files keep a local path (desktop only)
+- `swaProjectInventoryEdits` - Corrections typed into the table, keyed by the original workbook Project ID; exports use the corrected values and a reset restores the workbook values
+- `swaProjectInventoryColumns` - Which columns are shown, plus the columns added in the app (text or dropdown). Workbook columns are hidden, never deleted
+- `swaProjectInventoryView` - Remembered sort, tab and page size (column visibility lives in `swaProjectInventoryColumns` and is remembered too)
 
 ## Troubleshooting
 

@@ -457,12 +457,39 @@ class InstagramAnalytics {
 
     /* ── IPC window controls ──────────────────────── */
     setupWindowControls() {
+        const fullBtn = document.getElementById('tbFullscreen');
+        // Fullscreen hides the custom titlebar and gives its 38px back to the
+        // content, so the view really fills the screen instead of keeping a strip.
+        const markFullscreen = (on) => {
+            document.documentElement.classList.toggle('swa-app-fullscreen', !!on);
+            if (!fullBtn) return;
+            fullBtn.title = on ? 'Exit fullscreen (F11 / Esc)' : 'Fullscreen (F11)';
+            fullBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            fullBtn.classList.toggle('active', !!on);
+        };
+
         try {
             const { ipcRenderer } = require('electron');
             document.getElementById('tbMinimize')?.addEventListener('click', () => ipcRenderer.send('window-minimize'));
             document.getElementById('tbMaximize')?.addEventListener('click', () => ipcRenderer.send('window-maximize'));
             document.getElementById('tbClose')?.addEventListener('click', () => ipcRenderer.send('window-close'));
-        } catch { /* not in Electron */ }
+            fullBtn?.addEventListener('click', () => ipcRenderer.send('window-fullscreen'));
+            ipcRenderer.on('fullscreen-changed', (_e, on) => markFullscreen(on));
+            ipcRenderer.send('window-fullscreen-state');
+            return;
+        } catch { /* not in Electron — fall through to the browser API */ }
+
+        // Web preview / any plain browser: the standard Fullscreen API.
+        document.addEventListener('fullscreenchange', () => markFullscreen(!!document.fullscreenElement));
+        fullBtn?.addEventListener('click', () => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen?.().catch(() => { });
+            } else if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => { });
+            } else {
+                markFullscreen(!document.documentElement.classList.contains('swa-app-fullscreen'));
+            }
+        });
     }
 
 

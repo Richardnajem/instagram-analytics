@@ -504,6 +504,13 @@ P.navigateTo = function(pageId) {
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         document.querySelector(`.nav-item[data-page="${pageId}"]`)?.classList.add('active');
 
+        // Leave the Projects full-screen view cleanly when navigating away —
+        // otherwise its titlebar-hiding class would follow the user to other pages.
+        if (this.currentPage === 'projects' && pageId !== 'projects' &&
+            typeof this.projectInventoryBlur === 'function') {
+            this.projectInventoryBlur();
+        }
+
         const show = () => {
             oldPage?.classList.remove('active');
             newPage.classList.add('active');
