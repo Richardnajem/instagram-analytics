@@ -52,6 +52,7 @@ modules call, it does not need to be in that list, but a missing one is surfaced
 | Publishing the preview to a public URL (and proving it) | `deploy-web.js` (`npm run deploy:web`), documented in README §Online preview |
 | Chrome/Edge discovery for the build + web test | `web-tools.js` |
 | Checking a DEPLOYED copy against this build (`test_web_smoke.js --url <base>`) | `test_web_smoke.js` |
+| The archive audit workbook's progress index (its first page, `0 Progress Index`) | `add_progress_index.py` (counts read from the workbook's own sheets; re-runnable) |
 
 ## Data-honesty rules (do not break these)
 
@@ -135,6 +136,7 @@ npm test          # pagination, scan orchestration, saved-scan snapshots, projec
 npm run test:boot # launches the real index.html in Electron and asserts a clean boot
 npm run test:web  # builds web/ and loads it in a real browser (Chrome/Edge) to prove the shared preview works
 npm run gen:inventory # rewrites SmallWorld-Project-Inventory.xlsx from project-inventory.js
+python add_progress_index.py SMALLWORLD_EVENTS.xlsx  # rebuilds the workbook's "0 Progress Index" page from its own figures
 ```
 
 ## Known hazard

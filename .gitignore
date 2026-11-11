@@ -21,3 +21,6 @@ __pycache__/
 # Agent attachments / transient downloads
 .cloud-attachments/
 
+# Pre-rewrite copies of SMALLWORLD_EVENTS.xlsx made by add_progress_index.py (6 MB each)
+.freebuff/*.xlsx
+
